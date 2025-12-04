@@ -1,3 +1,5 @@
+import os
+
 import dash
 from dash import html, dcc
 import dash_bootstrap_components as dbc
@@ -102,4 +104,8 @@ register_simulation_callbacks(app)
 #     return False
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Get the PORT from the environment (default to 8050 if not set)
+    port = int(os.environ.get("PORT", 8050))
+    
+    # Host must be 0.0.0.0 to be accessible externally
+    app.run(host="0.0.0.0", port=port, debug=False)
