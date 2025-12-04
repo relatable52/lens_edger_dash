@@ -101,6 +101,7 @@ def render_simulation_scene(
             # 2a. Raw Blank (Ghost)
             children_views.append(
                 dash_vtk.GeometryRepresentation(
+                    id = "sim-lens-blank-rep",
                     actor={
                         "position": [lens_x, 0, lens_z],
                         "orientation": [0, 0, -lens_rot],
@@ -123,6 +124,7 @@ def render_simulation_scene(
             color = [0.2, 0.6, 1.0] if view_side == "L" else [1.0, 0.6, 0.2]
             children_views.append(
                 dash_vtk.GeometryRepresentation(
+                    id="sim-lens-cut-rep",
                     actor={
                         "position": [lens_x, 0, lens_z],
                         "orientation": [0, 0, -lens_rot],
@@ -142,38 +144,6 @@ def render_simulation_scene(
                     ]
                 )
             )
-
-            # 2c. Bevel Curve
-            # Reconstruct lines [2, i, i+1]
-            # bev_pts = lens_data.bevel_data.points
-            # n_bev = len(bev_pts) // 3
-            # bev_lines = []
-            # for i in range(n_bev):
-            #     bev_lines.extend([2, i, (i + 1) % n_bev])
-
-            # children_views.append(
-            #     dash_vtk.GeometryRepresentation(
-            #         actor={
-            #             "position": [lens_x, 0, lens_z],
-            #             "rotation": [0, 0, -lens_rot],
-            #         },
-            #         mapper={"colorByArrayName": "RGBColor", "scalarMode": 3},
-            #         children=[
-            #             dash_vtk.PolyData(
-            #                 points=bev_pts,
-            #                 lines=bev_lines,
-            #                 children=[
-            #                     dash_vtk.PointData([
-            #                         dash_vtk.DataArray(
-            #                             name="RGBColor", numberOfComponents=3,
-            #                             values=lens_data.bevel_data.status_colors, type='Uint8Array'
-            #                         )
-            #                     ])
-            #                 ]
-            #             )
-            #         ]
-            #     )
-            # )
 
     # --- C. Reference Ground Plane ---
     children_views.append(

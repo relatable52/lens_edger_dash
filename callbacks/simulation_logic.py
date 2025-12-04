@@ -1,4 +1,4 @@
-from dash import Input, Output, State, ctx, no_update
+from dash import Input, Output, State, no_update, clientside_callback
 import numpy as np
 
 from core.models.lenses import OMAJob, LensPairSimulationData
@@ -94,16 +94,15 @@ def register_simulation_callbacks(app):
         if new_val > 100: return 0
         return new_val
 
-    # --- 3. RENDER SCENE ---
+    # --- 3A. Setup 3D scene ---
     @app.callback(
         Output('vtk-container-sim', 'children'),
-        Input('sim-slider', 'value'),
         Input('store-simulation-path', 'data'),
         State('store-mesh-cache', 'data'),
         State('view-eye-select', 'value'),
         prevent_initial_call=True
     )
-    def render_simulation_frame(slider_val, path_data, mesh_cache, view_mode):
+    def render_simulation_frame(path_data, mesh_cache, view_mode):
         if not path_data or not mesh_cache:
             # Return empty or loading state
             return simulation_tab.render_simulation_scene({}, 0, None)
@@ -114,7 +113,7 @@ def register_simulation_callbacks(app):
         # Map Slider to Frame Index
         total_frames = path_data.get('total_frames', 100)
         # Safe integer conversion
-        frame_idx = int((slider_val / 100.0) * (total_frames - 1))
+        frame_idx = 0
         
         # Rehydrate Mesh Data
         lens_pair = LensPairSimulationData.from_dict(mesh_cache)
@@ -125,3 +124,39 @@ def register_simulation_callbacks(app):
             lens_pair_data=lens_pair,
             view_side=side
         )
+    
+    # --- 3B. ANIMATE SCENE ---
+    clientside_callback(
+        """
+        function(slider_val, path_data) {
+            // 1. Safety Checks
+            if (!path_data || !path_data.x) {
+                return [window.dash_clientside.no_update, window.dash_clientside.no_update];
+            }
+
+            // 2. Map Slider (0-100) to Frame Index
+            const total_frames = path_data.total_frames;
+            const frame_idx = Math.floor((slider_val / 100.0) * (total_frames - 1));
+
+            // 3. Get coordinates
+            const x = path_data.x[frame_idx];
+            const z = path_data.z[frame_idx];
+            const theta = path_data.theta[frame_idx];
+
+            // 4. Create new Actor state
+            // Note: Dash VTK actor prop expects { position: [x,y,z], orientation: [rx,ry,rz] }
+            const new_actor_state = {
+                position: [x, 0, z],
+                orientation: [0, 0, -theta] // Negative because of coordinate system differences often found
+            };
+
+            // 5. Return this state to BOTH the Blank and the Cut lens representations
+            return [new_actor_state, new_actor_state];
+        }
+        """,
+        Output('sim-lens-blank-rep', 'actor'),
+        Output('sim-lens-cut-rep', 'actor'),
+        Input('sim-slider', 'value'),
+        State('store-simulation-path', 'data'),
+        prevent_initial_call=True
+    )
