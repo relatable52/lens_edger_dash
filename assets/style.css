@@ -1,0 +1,113 @@
+/* Main Container Setup */
+#sidebar-container {
+    height: 100vh;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    background-color: #f8f9fa; /* Light grey background */
+    border-right: 1px solid #dee2e6;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* The Scrollable Middle Section */
+.sidebar-content {
+    flex: 1; /* Takes up all available space */
+    overflow-y: auto; /* Scrolls if content is too long */
+    padding: 20px;
+    padding-bottom: 0;
+}
+
+/* Custom Scrollbar */
+.sidebar-content::-webkit-scrollbar {
+    width: 5px;
+}
+.sidebar-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+.sidebar-content::-webkit-scrollbar-thumb {
+    background: #cbd5e0;
+    border-radius: 4px;
+}
+.sidebar-content::-webkit-scrollbar-thumb:hover {
+    background: #a0aec0;
+}
+
+/* The Sticky Footer */
+.sidebar-footer {
+    padding: 15px 20px;
+    background-color: #fff;
+    border-top: 1px solid #dee2e6;
+    box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.05);
+    z-index: 10;
+}
+
+/* Typography & Headings */
+.sidebar-heading {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #6c757d;
+    margin-bottom: 10px;
+}
+
+.sidebar-section {
+    margin-bottom: 5px;
+}
+
+/* Input Styling (Fixing the Corners & Size) */
+.form-control-sm, .input-group-text-sm {
+    font-size: 0.8rem !important;
+    border-radius: 4px; /* Consistent small radius */
+}
+
+/* Fix Bootstrap InputGroups to have clean joined corners */
+.input-group-sm > .input-group-text {
+    background-color: #e9ecef;
+    border: 1px solid #ced4da;
+    border-right: none;
+    font-weight: 500;
+    color: #495057;
+}
+
+.input-group-sm > .form-control:focus {
+    box-shadow: none;
+    border-color: #80bdff;
+}
+
+/* Upload Box Styling */
+.upload-box {
+    border: 1px dashed #adb5bd;
+    border-radius: 6px;
+    background-color: #fff;
+    text-align: center;
+    padding: 15px 0;
+    font-size: 0.85rem;
+    color: #495057;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.upload-box:hover {
+    border-color: #0d6efd;
+    background-color: #f1f8ff;
+    color: #0d6efd;
+}
+
+/* Tabs Styling */
+.small-tabs .nav-link {
+    padding: 5px 10px;
+    color: #6c757d;
+    border-radius: 4px 4px 0 0;
+}
+.small-tabs .nav-link.active {
+    font-weight: 600;
+    color: #0d6efd;
+    border-color: #dee2e6 #dee2e6 #fff;
+}
+
+/* Small Tab Title */
+.small-tab-title {
+    font-size: 0.85rem;
+    margin-bottom: 10px;
+}
