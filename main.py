@@ -18,6 +18,7 @@ from callbacks import (
 
 # --- APP SETUP ---
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.SPACELAB, "assets/style.css"], external_scripts=[])
+server = app.server
 
 # --- CONTROL SIDEBAR (Left Panel) ---
 sidebar_content = sidebar.layout()
