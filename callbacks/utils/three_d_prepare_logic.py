@@ -1,5 +1,13 @@
+import numpy as np
+
 from core.models.lenses import OMAJob, LensPair, LensSimulationData, MeshData, BevelData
-from core.geometric.three_d_generation import generate_lens_mesh, offset_radii_map, calculate_bevel_geometry
+from core.geometric.three_d_generation import (
+    generate_lens_mesh, 
+    offset_radii_map, 
+    calculate_bevel_geometry,
+    calculate_bevel_z_map,
+    generate_bevel_lens_mesh
+)
 
 def calculate_lens_geometry(job: OMAJob, lens_pair: LensPair, bevel_pos_percent: float, bevel_width: float = 1.0) -> dict:
     """
@@ -26,11 +34,9 @@ def calculate_lens_geometry(job: OMAJob, lens_pair: LensPair, bevel_pos_percent:
         offset_y = frame.ocht - (frame.vbox / 2.0)
         
         # Apply offsets to frame data to center it on the lens blank
-        radii, bevel_z = offset_radii_map(frame.radii, frame.z_map, -offset_x, -offset_y)
-        
-        c_pts, c_polys = generate_lens_mesh(
-            radii, blank.front_radius, blank.back_radius, blank.center_thickness
-        )
+        radii, _ = offset_radii_map(frame.radii, frame.z_map, -offset_x, -offset_y)
+        bevel_z = calculate_bevel_z_map(radii, 104.6)
+
 
         # 3. Generate Bevel
         bev_pts, bev_status, bevel_z = calculate_bevel_geometry(
@@ -38,6 +44,21 @@ def calculate_lens_geometry(job: OMAJob, lens_pair: LensPair, bevel_pos_percent:
             blank.front_radius, blank.back_radius, blank.center_thickness, 
             bevel_pos_percent=bevel_pos_percent/100.0, 
             bevel_width=bevel_width
+        )
+
+        c_pts, c_polys = generate_bevel_lens_mesh(
+            radii_map=radii,
+            bevel_z_map=bevel_z,
+            tool_profile=np.array([
+                [-1.51, 9.04],
+                [-1, 1.73],
+                [-0, 0],
+                [-0.7, -1.21],
+                [-0.7, -9.27]
+            ]),
+            front_curve=blank.front_radius,
+            back_curve=blank.back_radius,
+            thickness=blank.center_thickness
         )
         
         # Color Processing (Green/Red)
