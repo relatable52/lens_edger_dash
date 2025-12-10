@@ -1,7 +1,7 @@
 import dash_bootstrap_components as dbc
-from dash import html, dcc
+from dash import html, dcc, dash_table
 
-# 1. Helper to reduce repetition and ensure consistency
+# Helper to reduce repetition and ensure consistency
 def make_input_group(label, id, placeholder, value=None):
     return dbc.InputGroup(
         [   
@@ -15,7 +15,7 @@ def make_input_group(label, id, placeholder, value=None):
 def layout():
     return sidebar
 
-# 2. Section: File Upload
+# Section: File Upload
 file_upload = html.Div(
     className="sidebar-section",
     children=[
@@ -30,7 +30,7 @@ file_upload = html.Div(
     ]
 )
 
-# 3. Section: Frame Params
+# Section: Frame Params
 frame_parameters = html.Div(
     className="sidebar-section",
     children=[
@@ -56,7 +56,7 @@ frame_parameters = html.Div(
     ]
 )
 
-# 4. Section: Lens Blank
+# Section: Lens Blank
 def lens_tab_content(prefix):
     return html.Div([
         make_input_group("Front R", f"{prefix}-front-curv", None, value = 1000),
@@ -76,7 +76,7 @@ lens_blank_parameters = html.Div(
     ]
 )
 
-# 5. Section: Bevel
+# Section: Bevel
 bevel_settings = html.Div(
     className="sidebar-section",
     children=[
@@ -91,18 +91,17 @@ bevel_settings = html.Div(
     ]
 )
 
-# 6. Footer: Actions
+# Footer: Actions
 action_buttons = html.Div(
     className="sidebar-footer",
     children=[
-        dbc.Button("Generate Paths", id="btn-gen-path", color="primary", size="sm", className="w-100 mb-2 fw-bold"),
-        dbc.Button("Download G-Code", id="btn-save", color="light", size="sm", className="w-100 border"),
+        dbc.Button("Update Lens Shape", id="btn-update-shape", color="primary", size="sm", className="w-100 mb-2 fw-bold"),
     ]
 )
 
-# 7. Main Layout Construction
+# Main Layout Construction
 sidebar = html.Div(
-    id="sidebar-container",
+    className="sidebar-container",
     children=[
         # Scrollable Area
         html.Div(

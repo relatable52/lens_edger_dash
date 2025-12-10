@@ -1,4 +1,5 @@
 import numpy as np
+import trimesh
 
 def offset_radii_map(radii_map, z_map, offset_x, offset_y):
     """
@@ -601,6 +602,28 @@ def generate_bevel_lens_mesh(
             polys.extend([3, p1, p3, p4])
             
     return points, polys
+def calculate_mesh_volume(points, polys):
+    """
+    Args:
+        points: Flat list [x1, y1, z1, x2, y2, z2, ...]
+        polys: VTK-style flat list [3, p1, p2, p3, 3, p1, p3, p4, ...]
+    """
+    # 1. Convert flat points list to (N, 3) numpy array
+    vertices = np.array(points).reshape(-1, 3)
+
+    # 2. Convert VTK polys list to (M, 3) faces array
+    # The list looks like [3, a, b, c, 3, d, e, f...]
+    # We reshape to (M, 4) and drop the first column (which is always 3)
+    faces = np.array(polys).reshape(-1, 4)[:, 1:]
+
+    # 3. Create the mesh object
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+
+    # 4. Check if watertight (volume is undefined for open meshes)
+    if not mesh.is_watertight:
+        print("Warning: Mesh is not watertight! Volume result may be wrong.")
+    
+    return mesh.volume
 
 if __name__ == "__main__":
    # Your Tool Profile (from previous prompt)
