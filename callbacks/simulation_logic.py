@@ -34,8 +34,6 @@ def register_simulation_callbacks(app):
         machine = load_machine_config_cached()
         wheel = machine.wheels[0]
         tool_radius = wheel.cutting_radius
-
-        # print("input_z_map", bevel_data.z_map[0])
         
         kinematics = solve_lens_kinematics_robust(
             radii=bevel_data.radii,
@@ -62,8 +60,6 @@ def register_simulation_callbacks(app):
         
         if not full_path:
             return no_update
-        
-        # print("full_path", full_path['z'][10])
 
         # 4. Serialize for Store (Numpy -> List)
         return {

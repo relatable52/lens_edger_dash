@@ -86,10 +86,7 @@ def solve_lens_kinematics_robust(radii, z_map, tool_radius, tool_tilt_angle_deg,
         tilt_z_comp = (current_machine_x - x_rot[max_idx_local]) * np.tan(np.deg2rad(tool_tilt_angle_deg))
         
         current_machine_z = tool_z_offset - z_map[contact_point_idx] - tilt_z_comp
-        # if(theta_m < theta_machine[1]): print("z_map_contact", z_map[contact_point_idx])
         machine_z_path.append(current_machine_z)
-
-    # print("machine_z_path", machine_z_path[0])
 
     return {
         "theta_machine_deg": np.degrees(theta_machine),
