@@ -83,6 +83,7 @@ app.layout = dbc.Container([
     dcc.Store(id='store-oma-job'), # Hidden store for OMA Job data
     dcc.Store(id='store-lenses-data'), # Hidden store for lenses data
     dcc.Store(id='store-mesh-cache'), # Hidden store for calculated mesh data
+    dcc.Store(id='store-bevel-settings'), # Hidden store for bevel settings
     dcc.Store(id='store-simulation-path'), # Hidden store for full simulation path
     dcc.Interval(id='sim-interval', disabled=True),
     dbc.Tabs([

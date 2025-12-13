@@ -126,20 +126,20 @@ def calculate_bevel_z_map(radii_map: np.ndarray, curve_radius: float):
     bevel_z_map = curve_radius - np.sqrt(curve_radius**2 - np.minimum(radii_map, curve_radius)**2)
     return bevel_z_map
 
-def calculate_bevel_geometry(radii_map, z_map, front_curve_mm, back_curve_mm, thickness_mm, bevel_pos_percent=0.5, bevel_width=1.0):
+def calculate_bevel_geometry(radii_map, z_map, front_curve_mm, back_curve_mm, thickness_mm, bevel_pos=0.0, bevel_width=0.0):
     """
     Calculates the 3D path of the bevel tip along the lens edge.
     Checks if the bevel fits within the available edge thickness.
     
     Args:
-        bevel_pos_percent (float): 0.0 = Front Surface, 1.0 = Back Surface.
+        bevel_pos (float): Shift from front surface.
         bevel_width (float): Width of the bevel in mm (Safety margin).
     
     Returns:
         points (list): [x,y,z] coordinates for the line.
         scalars (list): 0 = Valid (Green), 1 = Invalid (Red).
     """
-    assert 0.0 <= bevel_pos_percent <= 1.0, "bevel_pos_percent must be between 0.0 and 1.0"
+    assert 0.0 <= bevel_pos, "bevel_pos must be non-negative"
     assert len(radii_map) == len(z_map), "radii_map and z_map must have the same length"
 
     if np.isscalar(radii_map):
@@ -161,8 +161,8 @@ def calculate_bevel_geometry(radii_map, z_map, front_curve_mm, back_curve_mm, th
 
     z_front_surf = front_curve_mm - np.sqrt(front_curve_mm**2 - np.minimum(radii, front_curve_mm)**2)
     z_back_surf = back_curve_mm + thickness_mm - np.sqrt(back_curve_mm**2 - np.minimum(radii, back_curve_mm)**2) 
-    min_offset = np.max(z_front_surf - z_map)
-    max_offset = np.min(z_back_surf - z_map)
+    min_index = np.argmin(z_back_surf-z_front_surf)
+    min_offset = z_front_surf[min_index] - z_map[min_index]
 
     output_z = []
     
@@ -183,7 +183,7 @@ def calculate_bevel_geometry(radii_map, z_map, front_curve_mm, back_curve_mm, th
         
         # 3. Calculate Desired Z
         # Map 0% -> z_front_surf, 100% -> z_back_surf
-        desired_z = z_map[i] + min_offset + bevel_pos_percent * (max_offset - min_offset)
+        desired_z = z_map[i] + min_offset + bevel_pos
         
         # 4. Check Validity
         is_valid = True
@@ -400,7 +400,7 @@ def solve_sphere_line_intersection(p1, p2, circle_center, R):
 
 def get_single_slice_contour(r_edge, z_edge, tool_profile, 
                              front_curve, back_curve, thickness, 
-                             n_arc_steps=5, n_tool_steps=10):
+                             n_arc_steps=5, n_tool_steps=20):
     """
     Calculates the (r, z) coordinates for ONE slice of the lens.
     
@@ -430,7 +430,6 @@ def get_single_slice_contour(r_edge, z_edge, tool_profile,
         hit = solve_sphere_line_intersection(tool_global[k], tool_global[k+1], front_center, front_curve)
         if hit is not None:
             front_int = hit
-            # print("Front", hit, k+1)
             tool_start_idx = k + 1 
             break
             
@@ -447,7 +446,6 @@ def get_single_slice_contour(r_edge, z_edge, tool_profile,
         hit = solve_sphere_line_intersection(tool_global[k], tool_global[k+1], back_center, back_curve)
         if hit is not None:
             back_int = hit
-            # print("Back", hit, k)
             tool_end_idx = k
             break
             
@@ -475,7 +473,6 @@ def get_single_slice_contour(r_edge, z_edge, tool_profile,
     # Extract raw points between intersections
     raw_tool_pts = [front_int]
     if tool_start_idx <= tool_end_idx:
-        # print(tool_global[tool_start_idx : tool_end_idx+1])
         raw_tool_pts.extend(tool_global[tool_start_idx : tool_end_idx+1])
     else:
         raw_tool_pts.extend(tool_global[tool_start_idx -1 : tool_end_idx: -1])
@@ -557,7 +554,6 @@ def generate_bevel_lens_mesh(
             points.extend([px, py, pz])
 
     # --- 4. Generate Polygons ---
-    
     for i in range(resolution):
         curr_i = i
         next_i = (i + 1) % resolution

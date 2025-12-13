@@ -1,8 +1,9 @@
-from dataclasses import dataclass
-from typing import Optional, List
+from dataclasses import dataclass, field
+from typing import Optional, List, Literal
 
 import numpy as np
 
+# Lens specification
 @dataclass
 class FrameSide:
     """
@@ -138,6 +139,56 @@ class LensPair:
             right=LensBlank(**data['right'])
         )
 
+# Bevel settings
+# --- Define Strict Types for Enums ---
+BevelType = Literal[
+    "flat_no_polishing",
+    "flat_polishing",
+    "vbevel_no_polishing",
+    "vbevel_polishing",
+    "groove"
+]
+
+BevelCurveMode = Literal["ratio", "diopter", "oma"]
+
+@dataclass
+class BevelSettings:
+    """
+    Stores the user configuration for how the bevel should be calculated.
+    """
+    type: BevelType
+    curve_mode: BevelCurveMode
+    
+    # This single value is interpreted differently based on curve_mode:
+    # - RATIO: 0.0 to 100.0 (percent)
+    # - DIOPTER: 0.0 to 10.0 (curvature)
+    # - OMA: Value is ignored (uses file data)
+    curve_value: float 
+    
+    z_shift_mm: float = 0.0
+
+    def to_dict(self):
+        return {
+            "type": self.type,
+            "curve_mode": self.curve_mode,
+            "curve_value": self.curve_value,
+            "z_shift_mm": self.z_shift_mm
+        }
+
+    @staticmethod
+    def from_dict(data: dict):
+        if not data: 
+            # Default fallback
+            return BevelSettings("vbevel_no_polishing", "ratio", 50.0, 0.0)
+            
+        return BevelSettings(
+            type=data.get("type", "vbevel_no_polishing"),
+            curve_mode=data.get("curve_mode", "ratio"),
+            curve_value=data.get("curve_value", 50.0),
+            z_shift_mm=data.get("z_shift_mm", 0.0)
+        )
+
+# Geometry related
 @dataclass
 class MeshData:
     """

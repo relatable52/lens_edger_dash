@@ -2,14 +2,21 @@ import dash_bootstrap_components as dbc
 from dash import html, dcc, dash_table
 
 # Helper to reduce repetition and ensure consistency
-def make_input_group(label, id, placeholder, value=None):
+def make_input_group(label, id, placeholder, value=None, container_style={}, **input_props):
     return dbc.InputGroup(
         [   
             dbc.InputGroupText(label, style={"fontSize": "0.75rem"}),
-            dbc.Input(id=id, type="number", placeholder=placeholder, value=value, size="sm"),
+            dbc.Input(
+                id=id, 
+                placeholder=placeholder, 
+                value=value, 
+                size="sm", 
+                **input_props # Pass extra props like type="number", min=0 here
+            ),
         ],
         class_name="mb-2 shadow-sm",
-        size="sm"
+        size="sm",
+        style=container_style
     )
 
 def layout():
@@ -59,9 +66,9 @@ frame_parameters = html.Div(
 # Section: Lens Blank
 def lens_tab_content(prefix):
     return html.Div([
-        make_input_group("Front R", f"{prefix}-front-curv", None, value = 1000),
-        make_input_group("Back R", f"{prefix}-back-curv", None, value = 500),
-        make_input_group("Center Thk", f"{prefix}-center-thk", None, value = 3),
+        make_input_group("Front R", f"{prefix}-front-curv", None, value = 523),
+        make_input_group("Back R", f"{prefix}-back-curv", None, value = 87),
+        make_input_group("Center Thk", f"{prefix}-center-thk", None, value = 2),
         make_input_group("Diameter", f"{prefix}-dia", None, value = 70),
     ])
 
@@ -80,14 +87,70 @@ lens_blank_parameters = html.Div(
 bevel_settings = html.Div(
     className="sidebar-section",
     children=[
-        html.H6("Bevel Settings (only frame curve for now)", className="sidebar-heading"),
-        html.Label("Bevel Shift", className="small text-muted mt-1"),
-        dcc.Slider(
-            id="input-bevel-pos",
-            min=0, max=100, step=5, value=50,
-            marks={0: 'Front', 100: 'Back'},
-            tooltip={"placement": "bottom", "always_visible": True}
-        )
+        html.H6("Bevel Settings", className="sidebar-heading"),
+        
+        # A. Bevel Type
+        dbc.Label("Bevel Type", html_for="bevel-type-dropdown", className="small text-muted"),
+        dcc.Dropdown(
+            id="bevel-type-dropdown",
+            options=[
+                {"label": "Flat without polishing", "value": "flat_no_polishing"},
+                {"label": "Flat with polishing", "value": "flat_polishing"},
+                {"label": "V-Bevel without polishing", "value": "vbevel_no_polishing"},
+                {"label": "V-Bevel with polishing", "value": "vbevel_polishing"},
+                {"label": "Groove", "value": "groove"},
+            ],
+            value="vbevel_no_polishing",
+            clearable=False,
+            className="mb-3 input-group-text-sm",
+        ),
+
+        # B. Curve Mode
+        dbc.Label("Bevel Curve", html_for="bevel-curve-dropdown", className="small text-muted"),
+        dcc.Dropdown(
+            id="bevel-curve-dropdown",
+            options=[
+                {"label": "Ratio", "value": "ratio"},
+                {"label": "Diopter", "value": "diopter"},
+                {"label": "From OMA", "value": "oma"},
+            ],
+            value="ratio",
+            clearable=False,
+            className="mb-2 input-group-text-sm",
+        ),
+
+        # C. Curve Inputs (Ratio & Diopter)
+        html.Div(id='bevel-curve-inputs', children=[
+            
+            # 1. Ratio Input Container (Visible by default)
+            html.Div(
+                id="bevel-ratio-container",
+                children=[
+                    make_input_group(
+                        "Ratio (%)", "bevel-ratio-input", "50", 
+                        value=50, type="number", min=0, max=100, step=1
+                    )
+                ]
+            ),
+
+            # 2. Diopter Input Container (Hidden by default)
+            html.Div(
+                id="bevel-diopter-container",
+                style={"display": "none"}, # Start hidden
+                children=[
+                    make_input_group(
+                        "Diopter", "diopter-input", "0.0", 
+                        value=0.0, type="number", step=0.25
+                    )
+                ]
+            )
+        ]),
+
+        # D. Vertical Shift
+        html.Div([
+            dbc.Label("Bevel Shift", html_for="input-bevel-pos", className="small text-muted"),
+            make_input_group("Vertical Shift (mm)", "input-bevel-pos", "0.0", type="number")
+        ])
     ]
 )
 

@@ -1,7 +1,7 @@
-from dash import Input, Output
+from dash import Input, Output, State
 
 from components import two_d_preview_tab, three_d_prepare_tab
-from core.models.lenses import OMAJob, LensPair, LensPairSimulationData
+from core.models.lenses import OMAJob, LensPair, LensPairSimulationData, BevelSettings
 from .utils.three_d_prepare_logic import calculate_lens_geometry
     
 def register_preview_callback(app):
@@ -19,21 +19,21 @@ def register_preview_callback(app):
     # Register callback to calculate and cache Lens Pair Simulation Data
     @app.callback(
         Output('store-mesh-cache', 'data'),
-        Input('store-oma-job', 'data'),
-        Input('store-lenses-data', 'data'),
-        Input('input-bevel-pos', 'value'),   # Slider 0-100
+        State('store-oma-job', 'data'),
+        State('store-lenses-data', 'data'),
+        State('store-bevel-settings', 'data'),
+        Input('btn-update-shape', 'n_clicks'),
         prevent_initial_call=True
     )
-    def calculate_geometry(oma_dict, lens_dict, bevel_pos):
+    def calculate_geometry(oma_dict, lens_dict, bevel_settings, n_clicks):
         if not oma_dict or not lens_dict:
             return None
             
         job = OMAJob.from_dict(oma_dict)
         lens_pair = LensPair.from_dict(lens_dict)
-        b_pos = float(bevel_pos) if bevel_pos is not None else 50.0
-        
+        bevel_settings = BevelSettings.from_dict(bevel_settings) if bevel_settings else None
         # This function runs the heavy math once
-        return calculate_lens_geometry(job, lens_pair, b_pos)
+        return calculate_lens_geometry(job, lens_pair, bevel_settings)
     
     # Register callback to update Lens Blank Preview
     @app.callback(
