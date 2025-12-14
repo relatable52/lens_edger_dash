@@ -5,7 +5,8 @@ from dash import html, dcc
 import dash_bootstrap_components as dbc
 
 from components import (
-    sidebar, 
+    prepare_sidebar,
+    movement_sidebar, 
     two_d_preview_tab,
     three_d_prepare_tab,
     simulation_tab
@@ -21,7 +22,8 @@ app = dash.Dash(__name__, external_stylesheets=[dbc.themes.SPACELAB, "assets/sty
 server = app.server
 
 # --- CONTROL SIDEBAR (Left Panel) ---
-sidebar_content = sidebar.layout()
+prepare_sidebar_content = prepare_sidebar.layout()
+movement_sidebar_content = movement_sidebar.layout()
 
 # --- MAIN TABS AREA ---
 tab_1_content = two_d_preview_tab.layout()
@@ -49,19 +51,31 @@ tab_3_content = simulation_tab.layout()
 #     ]), className="mt-3"
 # )
 
-prepare_tab = dbc.Tabs(
-    [
-        dbc.Tab(tab_1_content, label="2D Layout", label_class_name="small-tab-title", id="tab-2d-preview"),
-        dbc.Tab(tab_2_content, label="Estimated 3D View", label_class_name="small-tab-title", id="tab-3d-rough"),
-    ], id="prepare-section-tabs"
-)
+prepare_tab = dbc.Row([
+    dbc.Col(prepare_sidebar_content, width=3),
+    dbc.Col(
+        dbc.Tabs(
+            [
+                dbc.Tab(tab_1_content, label="2D Layout", label_class_name="small-tab-title", id="tab-2d-preview"),
+                dbc.Tab(tab_2_content, label="Estimated 3D View", label_class_name="small-tab-title", id="tab-3d-rough"),
+            ], id="prepare-section-tabs"
+        ),
+        width=9, class_name="p-4"
+    )
+])
 
-preview_tab = dbc.Tabs(
-    [
-        dbc.Tab(tab_3_content, label="Motion Simulation", label_class_name="small-tab-title", id="tab-3d-refined"),
-        # dbc.Tab(tab_4_content, label="Simulation", label_class_name="small-tab-title", id="tab-simulation"),
-    ], id="preview-section-tabs"
-)
+preview_tab = dbc.Row([
+    dbc.Col(movement_sidebar_content, width=3),
+    dbc.Col(
+        dbc.Tabs(
+            [
+                dbc.Tab(tab_3_content, label="Motion Simulation", label_class_name="small-tab-title", id="tab-3d-refined"),
+                # dbc.Tab(tab_4_content, label="Simulation", label_class_name="small-tab-title", id="tab-simulation"),
+            ], id="preview-section-tabs"
+        ),
+        width=9, class_name="p-4"
+    ) 
+])
 
 
 # --- APP LAYOUT ---
@@ -69,20 +83,13 @@ app.layout = dbc.Container([
     dcc.Store(id='store-oma-job'), # Hidden store for OMA Job data
     dcc.Store(id='store-lenses-data'), # Hidden store for lenses data
     dcc.Store(id='store-mesh-cache'), # Hidden store for calculated mesh data
+    dcc.Store(id='store-bevel-settings'), # Hidden store for bevel settings
     dcc.Store(id='store-simulation-path'), # Hidden store for full simulation path
     dcc.Interval(id='sim-interval', disabled=True),
-    dbc.Row([
-        # Sidebar Column
-        dbc.Col(sidebar_content, width=3, style={"backgroundColor": "#f8f9fa"}),
-        
-        # Main Content Column
-        dbc.Col([
-            dbc.Tabs([
-                dbc.Tab(prepare_tab, label="Prepare Design", id="tab-prepare"),
-                dbc.Tab(preview_tab, label="Preview & Simulate", id="tab-preview"),
-            ], id="main-section-tabs"),
-        ], width=9, class_name="p-4")
-    ])
+    dbc.Tabs([
+        dbc.Tab(prepare_tab, label="Prepare Design", id="tab-prepare"),
+        dbc.Tab(preview_tab, label="Preview & Simulate", id="tab-preview"),
+    ], id="main-section-tabs"),
 ], fluid=True)
 
 # --- CALLBACK ---
@@ -109,4 +116,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8050))
     
     # Host must be 0.0.0.0 to be accessible externally
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=True)

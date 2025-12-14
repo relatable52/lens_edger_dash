@@ -1,4 +1,5 @@
 import numpy as np
+import trimesh
 
 def offset_radii_map(radii_map, z_map, offset_x, offset_y):
     """
@@ -115,20 +116,30 @@ def create_roughing_radii(radii_map: np.ndarray, offset_mm: float = 2.0):
 
     return r_offset
 
-def calculate_bevel_geometry(radii_map, z_map, front_curve_mm, back_curve_mm, thickness_mm, bevel_pos_percent=0.5, bevel_width=1.0):
+def calculate_bevel_z_map(radii_map: np.ndarray, curve_radius: float):
+    """Calculate the bevel z depth based on the bevel curve radius
+
+    Args:
+        radii_map (np.ndarray): _description_
+        curve_radius (float): _description_
+    """
+    bevel_z_map = curve_radius - np.sqrt(curve_radius**2 - np.minimum(radii_map, curve_radius)**2)
+    return bevel_z_map
+
+def calculate_bevel_geometry(radii_map, z_map, front_curve_mm, back_curve_mm, thickness_mm, bevel_pos=0.0, bevel_width=0.0):
     """
     Calculates the 3D path of the bevel tip along the lens edge.
     Checks if the bevel fits within the available edge thickness.
     
     Args:
-        bevel_pos_percent (float): 0.0 = Front Surface, 1.0 = Back Surface.
+        bevel_pos (float): Shift from front surface.
         bevel_width (float): Width of the bevel in mm (Safety margin).
     
     Returns:
         points (list): [x,y,z] coordinates for the line.
         scalars (list): 0 = Valid (Green), 1 = Invalid (Red).
     """
-    assert 0.0 <= bevel_pos_percent <= 1.0, "bevel_pos_percent must be between 0.0 and 1.0"
+    assert 0.0 <= bevel_pos, "bevel_pos must be non-negative"
     assert len(radii_map) == len(z_map), "radii_map and z_map must have the same length"
 
     if np.isscalar(radii_map):
@@ -150,8 +161,8 @@ def calculate_bevel_geometry(radii_map, z_map, front_curve_mm, back_curve_mm, th
 
     z_front_surf = front_curve_mm - np.sqrt(front_curve_mm**2 - np.minimum(radii, front_curve_mm)**2)
     z_back_surf = back_curve_mm + thickness_mm - np.sqrt(back_curve_mm**2 - np.minimum(radii, back_curve_mm)**2) 
-    min_offset = np.max(z_front_surf - z_map)
-    max_offset = np.min(z_back_surf - z_map)
+    min_index = np.argmin(z_back_surf-z_front_surf)
+    min_offset = z_front_surf[min_index] - z_map[min_index]
 
     output_z = []
     
@@ -172,7 +183,7 @@ def calculate_bevel_geometry(radii_map, z_map, front_curve_mm, back_curve_mm, th
         
         # 3. Calculate Desired Z
         # Map 0% -> z_front_surf, 100% -> z_back_surf
-        desired_z = z_map[i] + min_offset + bevel_pos_percent * (max_offset - min_offset)
+        desired_z = z_map[i] + min_offset + bevel_pos
         
         # 4. Check Validity
         is_valid = True
@@ -344,25 +355,298 @@ def generate_lens_mesh(radii_map, front_curve_mm, back_curve_mm, thickness_mm, r
 
     return points, polys
 
+def solve_sphere_line_intersection(p1, p2, circle_center, R):
+    """
+    Finds intersection between a line segment (p1-p2) and a circle.
+    p1, p2, circle_center are (r, z) tuples/arrays. R is radius.
+    Returns intersection point (r, z) or None if no intersection in segment.
+    """
+    p1 = np.array(p1)
+    p2 = np.array(p2)
+    center = np.array(circle_center)
+    
+    d = p2 - p1
+    f = p1 - center
+    
+    # Quadratic equation: a*t^2 + b*t + c = 0
+    a = np.dot(d, d)
+    b = 2 * np.dot(f, d)
+    c = np.dot(f, f) - R**2
+    
+    discriminant = b**2 - 4*a*c
+    
+    if discriminant < 0:
+        return None
+    
+    # We generally want the intersection that implies the surface explicitly 
+    # transitions to the tool. 
+    t1 = (-b - np.sqrt(discriminant)) / (2*a)
+    t2 = (-b + np.sqrt(discriminant)) / (2*a)
+    
+    # Check if t is within the segment [0, 1]
+    # We prefer the intersection closest to p1 (start of tool) for front
+    # or logic depends on winding. Let's return the valid one.
+    
+    valid_t = []
+    if 0 <= t1 <= 1: valid_t.append(t1)
+    if 0 <= t2 <= 1: valid_t.append(t2)
+    
+    if not valid_t:
+        return None
+    
+    # Return the intersection point derived from the smallest valid t (first hit)
+    t_hit = min(valid_t)
+    return p1 + t_hit * d
+
+def get_single_slice_contour(r_edge, z_edge, tool_profile, 
+                             front_curve, back_curve, thickness, 
+                             n_arc_steps=5, n_tool_steps=20):
+    """
+    Calculates the (r, z) coordinates for ONE slice of the lens.
+    
+    Args:
+        r_edge: The radius distance where the tool apex sits.
+        z_edge: The Z height where the tool apex sits.
+        tool_profile: The standard tool shape (N, 2) relative to (0,0).
+    """
+    
+    # 1. Setup Centers
+    # Front Apex at (0,0), Center at (0, -FrontR)
+    front_center = (0, front_curve)
+    # Back Apex at (0, -Thick), Center at (0, -Thick - BackR)
+    # Note: Assuming standard meniscus/concave back where center is below.
+    # If the back curve is flatter than front, this setup works for standard lenses.
+    back_center = (0, thickness + back_curve)
+
+    # 2. Transform Tool to Global Space
+    tool_global = tool_profile + [r_edge, z_edge]
+    
+    # 3. Find Front Intersection
+    front_int = None
+    tool_start_idx = 0
+    
+    # Scan tool segments Top -> Bottom
+    for k in range(len(tool_global) - 1):
+        hit = solve_sphere_line_intersection(tool_global[k], tool_global[k+1], front_center, front_curve)
+        if hit is not None:
+            front_int = hit
+            tool_start_idx = k + 1 
+            break
+            
+    if front_int is None:
+        print("Warning: Tool did not intersect Front Surface! Lens might be too thin or tool too far out.")
+        return None
+
+    # 4. Find Back Intersection
+    back_int = None
+    tool_end_idx = len(tool_global) - 1
+    
+    # Scan tool segments Bottom -> Top
+    for k in range(len(tool_global) - 2, -1, -1):
+        hit = solve_sphere_line_intersection(tool_global[k], tool_global[k+1], back_center, back_curve)
+        if hit is not None:
+            back_int = hit
+            tool_end_idx = k
+            break
+            
+    if back_int is None:
+        print("Warning: Tool did not intersect Back Surface!")
+        return None
+
+    # --- Construct the Contour Arrays ---
+    contour_r = []
+    contour_z = []
+
+    # A. Front Arc (Center -> Intersection)
+    # We skip r=0 here, assuming the "Center Fan" will handle the very middle in 3D,
+    # or we can include it. Let's include r=0 for the 2D plot visualization.
+    r_target = front_int[0]
+    for i in range(1, n_arc_steps+1):
+        factor = i / (n_arc_steps+1) 
+        r = r_target * factor
+        # Z = -R + sqrt(R^2 - r^2)
+        z = front_curve - np.sqrt(front_curve**2 - r**2)
+        contour_r.append(r)
+        contour_z.append(z)
+    
+    # B. Tool Section (Resampled)
+    # Extract raw points between intersections
+    raw_tool_pts = [front_int]
+    if tool_start_idx <= tool_end_idx:
+        raw_tool_pts.extend(tool_global[tool_start_idx : tool_end_idx+1])
+    else:
+        raw_tool_pts.extend(tool_global[tool_start_idx -1 : tool_end_idx: -1])
+    raw_tool_pts.append(back_int)
+    
+    # Resample tool to fixed step count
+    raw_tool = np.array(raw_tool_pts)
+    dists = np.linalg.norm(raw_tool[1:] - raw_tool[:-1], axis=1)
+    cum_dist = np.insert(np.cumsum(dists), 0, 0)
+    target_dists = np.linspace(0, cum_dist[-1], n_tool_steps)
+    
+    interp_r = np.interp(target_dists, cum_dist, raw_tool[:,0])
+    interp_z = np.interp(target_dists, cum_dist, raw_tool[:,1])
+
+    for k in range(n_tool_steps):
+        contour_r.append(interp_r[k]); contour_z.append(interp_z[k])
+
+    # C. Back Arc (Intersection -> Center)
+    r_start = back_int[0]
+    for i in range(1, n_arc_steps + 1):
+        factor = i / (n_arc_steps + 1)
+        r = r_start * (1.0 - factor) # Go backwards from Edge to Center
+        
+        # Z = -Thick - R + sqrt(R^2 - r^2)
+        # Using the standard sphere equation centered at -Thick-R
+        safe_r = min(r, back_curve)
+        z = (thickness + back_curve) - np.sqrt(back_curve**2 - safe_r**2)
+        
+        contour_r.append(r)
+        contour_z.append(z)
+        
+    return np.array(contour_r), np.array(contour_z)
+
+def generate_bevel_lens_mesh(
+        radii_map, bevel_z_map, tool_profile, 
+        front_curve, back_curve, thickness, 
+        resolution=360
+):
+    if not np.isscalar(radii_map): resolution = len(radii_map)
+    # 1. Normalize Inputs
+    if np.isscalar(radii_map): radii_map = np.full(resolution, radii_map)
+    if np.isscalar(bevel_z_map): bevel_z_map = np.full(resolution, bevel_z_map)
+    
+    angles = np.linspace(0, 2*np.pi, resolution, endpoint=False)
+    cos_a = np.cos(angles)
+    sin_a = np.sin(angles)
+    
+    points = []
+    polys = []
+    
+    # --- 2. Add Center Points (Indices 0 and 1) ---
+    # Index 0: Front Center (Apex)
+    points.extend([0.0, 0.0, 0.0]) 
+    
+    # Index 1: Back Center (Apex)
+    # Note: Logic assumes Front Apex is 0, Back Apex is -thickness
+    points.extend([0.0, 0.0, thickness]) 
+    
+    OFFSET = 2 # The start index for slice data
+    
+    # --- 3. Generate All Slices (Points) ---
+    # We need to know how many points are in one slice to do the math later
+    slice_len = 0 
+    
+    for i in range(resolution):
+        # Generate 2D contour
+        rr, zz = get_single_slice_contour(radii_map[i], bevel_z_map[i], tool_profile,
+                                          front_curve, back_curve, thickness)
+        
+        # Capture the length of the slice (should be constant for all i)
+        if i == 0:
+            slice_len = len(rr)
+        
+        # Convert to 3D and Add
+        for k in range(len(rr)):
+            px = rr[k] * cos_a[i]
+            py = rr[k] * sin_a[i]
+            pz = zz[k]
+            points.extend([px, py, pz])
+
+    # --- 4. Generate Polygons ---
+    for i in range(resolution):
+        curr_i = i
+        next_i = (i + 1) % resolution
+        
+        # Helper variables for start indices of the slices
+        # Start of Slice i (Points block starts at OFFSET)
+        s_curr = OFFSET + curr_i * slice_len
+        s_next = OFFSET + next_i * slice_len
+        
+        # A. Front Center Cap (Fan)
+        # Connect Point 0 to the FIRST point of Slice i and Slice i+1
+        # First point of slice is index 0 within the slice
+        p1_fan = 0
+        p2_fan = s_curr + 0
+        p3_fan = s_next + 0
+        
+        # Winding: 0 -> Next -> Curr usually faces UP
+        polys.extend([3, p1_fan, p3_fan, p2_fan])
+        
+        # B. Back Center Cap (Fan)
+        # Connect Point 1 to the LAST point of Slice i and Slice i+1
+        last_idx = slice_len - 1
+        p1_fan_b = 1
+        p2_fan_b = s_curr + last_idx
+        p3_fan_b = s_next + last_idx
+        
+        # Winding: 1 -> Curr -> Next usually faces DOWN (outward from bottom)
+        polys.extend([3, p1_fan_b, p2_fan_b, p3_fan_b])
+        
+        # C. Side Ribbons (Quads along the contour)
+        # Iterate through the slice points, connecting j to j+1
+        for j in range(slice_len - 1):
+            # Four corners of the quad
+            p1 = s_curr + j
+            p2 = s_next + j
+            p3 = s_next + j + 1
+            p4 = s_curr + j + 1
+            
+            # Triangle 1
+            polys.extend([3, p1, p2, p3])
+            # Triangle 2
+            polys.extend([3, p1, p3, p4])
+            
+    return points, polys
+def calculate_mesh_volume(points, polys):
+    """
+    Args:
+        points: Flat list [x1, y1, z1, x2, y2, z2, ...]
+        polys: VTK-style flat list [3, p1, p2, p3, 3, p1, p3, p4, ...]
+    """
+    # 1. Convert flat points list to (N, 3) numpy array
+    vertices = np.array(points).reshape(-1, 3)
+
+    # 2. Convert VTK polys list to (M, 3) faces array
+    # The list looks like [3, a, b, c, 3, d, e, f...]
+    # We reshape to (M, 4) and drop the first column (which is always 3)
+    faces = np.array(polys).reshape(-1, 4)[:, 1:]
+
+    # 3. Create the mesh object
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+
+    # 4. Check if watertight (volume is undefined for open meshes)
+    if not mesh.is_watertight:
+        print("Warning: Mesh is not watertight! Volume result may be wrong.")
+    
+    return mesh.volume
 
 if __name__ == "__main__":
-    # Test roughing radii generation
+   # Your Tool Profile (from previous prompt)
+    tool_profile = np.array([
+        [1.58, 9.0],   # Top End
+        [1.58, 1.0],   # Top Shoulder
+        [0.0, 0.0],    # Apex
+        [1.40, -0.7],  # Bot Shoulder
+        [1.40, -9.7]   # Bot End
+    ])
+
+    # Simulation Parameters
+    R_EDGE = 35.0      # Lens radius where we are cutting
+    Z_EDGE = 3.5      # Position of the bevel tip (roughly middle of 5mm lens)
+    FRONT_C = 500.0    # 200mm Front Radius (approx +2.5 Diopter)
+    BACK_C = 200.0     # 200mm Back Radius
+    THICK = 5.0        # 5mm Center Thickness
+
+    # Run Generator
+    r, z = get_single_slice_contour(R_EDGE, Z_EDGE, tool_profile, 
+                                   FRONT_C, BACK_C, THICK)
+
     import matplotlib.pyplot as plt
 
-    test_radii = np.sin(np.linspace(0, 2*np.pi, 360)) * 40 + 50
-    rough_radii = create_roughing_radii(test_radii, offset_mm=2.0)
+    plt.figure(figsize=(10, 6))
+    
+    plt.plot(r, z, 'b-o', label='Generated Contour', markersize=3)
 
-    # Plotting for verification
-    angles = np.linspace(0, 2*np.pi, 360, endpoint=False)
-    x_orig = test_radii * np.cos(angles)
-    y_orig = test_radii * np.sin(angles)
-    x_rough = rough_radii * np.cos(angles)
-    y_rough = rough_radii * np.sin(angles)
-    print(test_radii)
-    print(rough_radii)
-    plt.figure()
-    plt.plot(x_orig, y_orig, label='Original Radii')
-    plt.plot(x_rough, y_rough, label='Roughing Radii')
-    plt.axis('equal')
-    plt.legend()
+    plt.grid(True)
     plt.show()
