@@ -2,7 +2,7 @@ from typing import List
 
 import numpy as np
 
-from core.geometric.three_d_generation import calculate_mesh_volume, generate_lens_mesh, 
+from core.geometric.three_d_generation import calculate_mesh_volume, generate_lens_mesh 
 from core.models.roughing import RoughingPassData, RoughingPassParam
 from core.models.lenses import MeshData
 

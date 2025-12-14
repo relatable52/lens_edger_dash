@@ -10,7 +10,7 @@ roughing_settings = html.Div(
     className="sidebar-section",
     children=[
         dbc.Row([
-            dbc.Col(html.H6("Roughing Cycles", className="sidebar-heading"), width=8),
+            dbc.Col(html.H6("Roughing Cycles (Not yet finished)", className="sidebar-heading"), width=8),
             dbc.Col(
                 dbc.Button("+", id="btn-add-roughing", size="sm", className="py-0 px-2"), 
                 width=4, className="text-end"
