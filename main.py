@@ -9,12 +9,14 @@ from components import (
     movement_sidebar, 
     two_d_preview_tab,
     three_d_prepare_tab,
-    simulation_tab
+    simulation_tab,
+    roughing_contour_tab
 )
 from callbacks import (
     register_preview_callback, 
     register_sidebar_callback, 
-    register_simulation_callbacks 
+    register_simulation_callbacks,
+    register_roughing_callbacks
 )
 
 # --- APP SETUP ---
@@ -30,26 +32,9 @@ tab_1_content = two_d_preview_tab.layout()
 
 tab_2_content = three_d_prepare_tab.layout()
 
-tab_3_content = simulation_tab.layout()
+tab_3_content = roughing_contour_tab.layout()
 
-# tab_4_content = dbc.Card(
-#     dbc.CardBody([
-#         html.H5("Tool Path Simulation"),
-#         # Simulation View
-#         html.Div(id="vtk-container-simu", style={"height": "60vh", "backgroundColor": "#111"}),
-        
-#         # Cura-style Player Controls
-#         dbc.Row([
-#             dbc.Col(dbc.Button("▶", id="sim-play", color="secondary"), width="auto"),
-#             # dbc.Col(
-#             #     dcc.Slider(
-#             #         id="sim-slider", min=0, max=100, step=1, value=0,
-#             #         marks={0: 'Start', 30: 'Rough', 70: 'Bevel', 100: 'Finish'},
-#             #     ),
-#             # )
-#         ], class_name="align-items-center mt-3")
-#     ]), className="mt-3"
-# )
+tab_4_content = simulation_tab.layout()
 
 prepare_tab = dbc.Row([
     dbc.Col(prepare_sidebar_content, width=3),
@@ -69,8 +54,8 @@ preview_tab = dbc.Row([
     dbc.Col(
         dbc.Tabs(
             [
-                dbc.Tab(tab_3_content, label="Motion Simulation", label_class_name="small-tab-title", id="tab-3d-refined"),
-                # dbc.Tab(tab_4_content, label="Simulation", label_class_name="small-tab-title", id="tab-simulation"),
+                dbc.Tab(tab_3_content, label="Roughing Contour", label_class_name="small-tab-title", id="tab-roughing-contour"),
+                dbc.Tab(tab_4_content, label="Motion Simulation", label_class_name="small-tab-title", id="tab-3d-refined"),
             ], id="preview-section-tabs"
         ),
         width=9, class_name="p-4"
@@ -85,7 +70,10 @@ app.layout = dbc.Container([
     dcc.Store(id='store-mesh-cache'), # Hidden store for calculated mesh data
     dcc.Store(id='store-bevel-settings'), # Hidden store for bevel settings
     dcc.Store(id='store-simulation-path'), # Hidden store for full simulation path
-    dcc.Interval(id='sim-interval', disabled=True),
+    dcc.Store(id='store-eye-select', data='L'), # Hidden store for eye selection
+    # dcc.Store(id='store-roughing-results'), # Hidden store for roughing results
+    dcc.Store(id='store-active-pass', data={'pass_index': 0, 'is_beveling': False}), # Active mesh pass for animation
+    dcc.Interval(id='sim-interval', disabled=True, interval=100), # Interval for simulation updates
     dbc.Tabs([
         dbc.Tab(prepare_tab, label="Prepare Design", id="tab-prepare"),
         dbc.Tab(preview_tab, label="Preview & Simulate", id="tab-preview"),
@@ -101,6 +89,9 @@ register_preview_callback(app)
 
 # Update the simulation
 register_simulation_callbacks(app)
+
+# Handle roughing cycle management
+register_roughing_callbacks(app)
 
 # @app.callback(
 #     Output("btn-save", "disabled"),

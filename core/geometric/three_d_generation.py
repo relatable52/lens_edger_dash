@@ -262,11 +262,20 @@ def generate_lens_mesh(radii_map, front_curve_mm, back_curve_mm, thickness_mm, r
         return back_curve_mm + thickness_mm - np.sqrt(back_curve_mm**2 - safe_r**2)
 
     # --- STEP 1: GENERATE POINTS ---
-    # We generate "Layers" of rings. 
-    # Structure: [Front_Ring_0, Front_Ring_1... Front_Ring_N] then [Back_Ring_0 ... Back_Ring_N]
+    # Strategy: Create CENTER points (apex) first, then concentric rings
+    # This avoids degenerate triangles at the center and ensures watertightness
     
-    # Front Surface Vertices
-    for j in range(radial_segments + 1):
+    # Front Center (Apex at 0, 0, 0)
+    front_center_idx = 0
+    points.extend([0.0, 0.0, 0.0])
+    
+    # Back Center (Apex at 0, 0, thickness)
+    back_center_idx = 1
+    points.extend([0.0, 0.0, thickness_mm])
+    
+    # Front Surface Rings (starting from j=1, j=0 is the center)
+    front_ring_start = len(points) // 3  # Mark where front rings begin
+    for j in range(1, radial_segments + 1):
         factor = j / radial_segments
         current_radii = edge_radii * factor
         
@@ -277,10 +286,9 @@ def generate_lens_mesh(radii_map, front_curve_mm, back_curve_mm, thickness_mm, r
         for i in range(num_angles):
             points.extend([xs[i], ys[i], zs[i]])
 
-    # Back Surface Vertices
-    # Note: We generate these separately to make stitching easier logic-wise
-    start_idx_back = len(points) // 3
-    for j in range(radial_segments + 1):
+    # Back Surface Rings (starting from j=1, j=0 is the center)
+    back_ring_start = len(points) // 3  # Mark where back rings begin
+    for j in range(1, radial_segments + 1):
         factor = j / radial_segments
         current_radii = edge_radii * factor
         
@@ -293,16 +301,25 @@ def generate_lens_mesh(radii_map, front_curve_mm, back_curve_mm, thickness_mm, r
 
     # --- STEP 2: GENERATE POLYGONS (STITCHING) ---
     
-    # A. Stitch Front Surface (Ring j to Ring j+1)
-    # Each ring has `num_angles` points.
-    for j in range(radial_segments):
-        ring_curr_start = j * num_angles
-        ring_next_start = (j + 1) * num_angles
+    # A. Front Surface Center Fan (Connect apex to first ring)
+    first_ring_start = front_ring_start
+    for i in range(num_angles):
+        next_i = (i + 1) % num_angles
+        p_center = front_center_idx
+        p_curr = first_ring_start + i
+        p_next = first_ring_start + next_i
+        
+        # Triangle pointing outward (normal up)
+        polys.extend([3, p_center, p_curr, p_next])
+    
+    # B. Front Surface Rings (Ring j to Ring j+1)
+    for j in range(radial_segments - 1):
+        ring_curr_start = front_ring_start + j * num_angles
+        ring_next_start = front_ring_start + (j + 1) * num_angles
         
         for i in range(num_angles):
             next_i = (i + 1) % num_angles
             
-            # Indices for the quad (p1, p2, p3, p4)
             p1 = ring_curr_start + i
             p2 = ring_curr_start + next_i
             p3 = ring_next_start + next_i
@@ -313,12 +330,21 @@ def generate_lens_mesh(radii_map, front_curve_mm, back_curve_mm, thickness_mm, r
             # Triangle 2
             polys.extend([3, p1, p3, p4])
 
-    # B. Stitch Back Surface (Ring j to Ring j+1)
-    # Similar to front, but we usually want to reverse winding order for normals to point out?
-    # VTK usually renders double-sided by default, but let's keep standard winding.
-    for j in range(radial_segments):
-        ring_curr_start = start_idx_back + j * num_angles
-        ring_next_start = start_idx_back + (j + 1) * num_angles
+    # C. Back Surface Center Fan (Connect apex to first ring)
+    first_back_ring_start = back_ring_start
+    for i in range(num_angles):
+        next_i = (i + 1) % num_angles
+        p_center = back_center_idx
+        p_curr = first_back_ring_start + i
+        p_next = first_back_ring_start + next_i
+        
+        # Triangle pointing outward (normal down) - reverse winding
+        polys.extend([3, p_center, p_next, p_curr])
+    
+    # D. Back Surface Rings (Ring j to Ring j+1)
+    for j in range(radial_segments - 1):
+        ring_curr_start = back_ring_start + j * num_angles
+        ring_next_start = back_ring_start + (j + 1) * num_angles
         
         for i in range(num_angles):
             next_i = (i + 1) % num_angles
@@ -328,16 +354,16 @@ def generate_lens_mesh(radii_map, front_curve_mm, back_curve_mm, thickness_mm, r
             p3 = ring_next_start + next_i
             p4 = ring_next_start + i
             
-            # Back surface faces "down", so flip triangle order compared to front
+            # Back surface faces "down", so flip triangle order
             polys.extend([3, p1, p3, p2])
             polys.extend([3, p1, p4, p3])
 
-    # C. Stitch Side Walls (Connecting Front Outer Ring to Back Outer Ring)
-    # Front Outer Ring is at index: radial_segments * num_angles
-    # Back Outer Ring is at index: start_idx_back + radial_segments * num_angles
+    # E. Stitch Side Walls (Connecting Front Outer Ring to Back Outer Ring)
+    # Front Outer Ring is at index: front_ring_start + (radial_segments-1) * num_angles
+    # Back Outer Ring is at index: back_ring_start + (radial_segments-1) * num_angles
     
-    front_edge_start = radial_segments * num_angles
-    back_edge_start = start_idx_back + radial_segments * num_angles
+    front_edge_start = front_ring_start + (radial_segments - 1) * num_angles
+    back_edge_start = back_ring_start + (radial_segments - 1) * num_angles
     
     for i in range(num_angles):
         next_i = (i + 1) % num_angles
@@ -347,11 +373,12 @@ def generate_lens_mesh(radii_map, front_curve_mm, back_curve_mm, thickness_mm, r
         b_curr = back_edge_start + i
         b_next = back_edge_start + next_i
         
-        # Wall Quad (f_curr, f_next, b_next, b_curr)
-        # Tri 1
-        polys.extend([3, f_curr, b_curr, b_next])
-        # Tri 2
-        polys.extend([3, f_curr, b_next, f_next])
+        # Wall faces outward (side of lens)
+        # Correct winding: f_curr -> f_next -> b_next -> b_curr
+        # Tri 1: f_curr -> f_next -> b_next
+        polys.extend([3, f_curr, f_next, b_next])
+        # Tri 2: f_curr -> b_next -> b_curr
+        polys.extend([3, f_curr, b_next, b_curr])
 
     return points, polys
 
