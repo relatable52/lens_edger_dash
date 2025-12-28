@@ -112,6 +112,10 @@ def calculate_lens_geometry(job: OMAJob, lens_pair: LensPair, bevel_settings: Be
             blank_mesh=MeshData(b_pts, b_polys),
             cut_mesh=MeshData(c_pts, c_polys),
             bevel_data=BevelData(bev_pts, bev_colors, radii, final_bevel_z),
+            blank_front_radius=blank.front_radius,
+            blank_back_radius=blank.back_radius,
+            blank_center_thickness=blank.center_thickness,
+            blank_diameter=blank.diameter
         )
 
         results[side_label] = sim_data.to_dict()

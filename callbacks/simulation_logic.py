@@ -1,8 +1,8 @@
-from dash import Input, Output, State, no_update, clientside_callback, MATCH, ALL
+from dash import Input, Output, State, no_update, clientside_callback, MATCH
 import numpy as np
 
-from core.models.lenses import OMAJob, LensPairSimulationData
-from core.models.roughing import RoughingPassData, RoughingSettings
+from core.models.lenses import LensPairSimulationData
+from core.models.roughing import RoughingPassData
 from core.cam.kinematics import solve_lens_kinematics_robust
 from core.cam.path_generation import generate_full_simulation_path
 from core.cam.movement_path import generate_complete_lens_path
@@ -69,13 +69,32 @@ def register_simulation_callbacks(app):
         if len(x) == 0:
             return no_update
 
-        # 5. Serialize for Store (Numpy -> List)
+        # 5. Build pass timing metadata from complete path
+        # Track cumulative time at the end of each pass for accurate active pass detection
+        pass_time_breaks = []
+        cumulative_time = 0.0
+        
+        for step in complete_path.steps:
+            if step.time is not None and len(step.time) > 0:
+                step_duration = step.time[-1]  # Duration of this step
+                cumulative_time += step_duration
+                
+                # Record breakpoint if this is a roughing or beveling step
+                if step.operation_type in ['roughing', 'beveling']:
+                    pass_time_breaks.append({
+                        'end_time': float(cumulative_time),
+                        'pass_index': int(step.pass_index),
+                        'operation_type': step.operation_type
+                    })
+
+        # 6. Serialize for Store (Numpy -> List)
         return {
             "x": x.tolist(),
             "z": z.tolist(),
             "theta": theta.tolist(),
             "time": time.tolist(),
-            "total_frames": len(x)
+            "total_frames": len(x),
+            "pass_time_breaks": pass_time_breaks
         }
 
     # --- 2. ANIMATION CONTROLS ---
@@ -250,27 +269,44 @@ def register_simulation_callbacks(app):
     # --- 3C. DETERMINE ACTIVE PASS INDEX (Clientside) ---
     clientside_callback(
         """
-        function(slider_time, path_data, roughing_results) {
-            if (!path_data || !roughing_results || !path_data.time) {
+        function(slider_time, path_data) {
+            if (!path_data || !path_data.time) {
                 return {pass_index: 0, is_beveling: false};
             }
 
-            const total_time = path_data.time[path_data.time.length - 1];
-            const num_passes = roughing_results.length;
-            const time_per_pass = total_time / (num_passes + 1);
+            // Use actual timing metadata from path_data
+            if (!path_data.pass_time_breaks || path_data.pass_time_breaks.length === 0) {
+                // Fallback to old behavior if metadata not available
+                const total_time = path_data.time[path_data.time.length - 1];
+                return {pass_index: 0, is_beveling: false};
+            }
+
+            // Find which pass the slider_time falls into using cumulative timing
+            let current_pass = 0;
+            let is_beveling = false;
             
-            let current_pass = Math.floor(slider_time / time_per_pass);
-            current_pass = Math.max(0, Math.min(current_pass, num_passes - 1));
+            for (let i = 0; i < path_data.pass_time_breaks.length; i++) {
+                const breakpoint = path_data.pass_time_breaks[i];
+                if (slider_time < breakpoint.end_time) {
+                    current_pass = breakpoint.pass_index;
+                    is_beveling = breakpoint.operation_type === 'beveling';
+                    break;
+                }
+            }
             
-            const is_beveling = slider_time > (time_per_pass * num_passes);
+            // If we've exceeded all breakpoints, we're at the last operation
+            if (slider_time >= path_data.pass_time_breaks[path_data.pass_time_breaks.length - 1].end_time) {
+                const last_break = path_data.pass_time_breaks[path_data.pass_time_breaks.length - 1];
+                current_pass = last_break.pass_index;
+                is_beveling = last_break.operation_type === 'beveling';
+            }
             
             return {pass_index: current_pass, is_beveling: is_beveling};
         }
         """,
         Output('store-active-pass', 'data'),
         Input('sim-slider', 'value'),
-        State('store-simulation-path', 'data'),
-        State('store-roughing-results', 'data')
+        State('store-simulation-path', 'data')
     )
 
     # --- 3D. UPDATE ROUGHING MESH OPACITY FROM STORE (Clientside Pattern-Matching) ---
@@ -294,11 +330,11 @@ def register_simulation_callbacks(app):
             };
 
             // 3. Direct Logic 
-            const pass_idx = id_dict.index; 
+            const pass_idx = id_dict.index;
             
             // Check if this specific lens should be visible
-            // Use loose equality (==) to handle string/number index mismatch
-            const is_visible = (pass_idx == current_pass) && !is_beveling;
+            // Convert pass_index from 1-indexed (from kinematics) to 0-indexed (for lens IDs)
+            const is_visible = (pass_idx == (current_pass - 1)) && !is_beveling;
 
             // 4. Return Single Property Object
             return {

@@ -278,15 +278,14 @@ def generate_full_roughing_path(
             (start_x - current_x)**2 + (start_z - current_z)**2
         )
         
-        if approach_dist > 0.1:
-            steps.append(_generate_linear_path(
-                start=(current_x, current_z, current_theta),
-                end=(start_x, start_z, start_theta),
-                distance_mm=approach_dist,
-                speed_mm_per_sec=xyz_feedrate,
-                feed_rate_s_per_rev=speed,
-                operation_type='approach'
-            ))
+        steps.append(_generate_linear_path(
+            start=(current_x, current_z, current_theta),
+            end=(start_x, start_z, start_theta),
+            distance_mm=approach_dist,
+            speed_mm_per_sec=xyz_feedrate,
+            feed_rate_s_per_rev=speed,
+            operation_type='approach'
+        ))
         
         # CUTTING PASS
         steps.append(_generate_cutting_path(
@@ -306,14 +305,13 @@ def generate_full_roughing_path(
     
     # 3. RETRACT TO HOME
     retract_dist = np.sqrt((home_x - current_x)**2 + (home_z - current_z)**2)
-    if retract_dist > 0.1:
-        steps.append(_generate_linear_path(
-            start=(current_x, current_z, current_theta),
-            end=(home_x, home_z, 0.0),
-            distance_mm=retract_dist,
-            speed_mm_per_sec=xyz_feedrate,
-            operation_type='retract'
-        ))
+    steps.append(_generate_linear_path(
+        start=(current_x, current_z, current_theta),
+        end=(home_x, home_z, 0.0),
+        distance_mm=retract_dist,
+        speed_mm_per_sec=xyz_feedrate,
+        operation_type='retract'
+    ))
     
     return MovementPath(steps)
 

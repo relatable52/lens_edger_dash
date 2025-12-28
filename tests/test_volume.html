@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>VTK.js Time-Stamped Machining</title>
+  <script type="text/javascript" src="https://unpkg.com/vtk.js"></script>
+  <style>
+    body { margin: 0; padding: 0; overflow: hidden; font-family: sans-serif; }
+    #container { width: 50vw; height: 50vh; border: 4px solid #a4d843;}
+    #controls {
+      position: absolute; top: 20px; left: 20px;
+      background: rgba(0,0,0,0.7); color: white; padding: 10px;
+      border-radius: 5px; z-index: 100;
+    }
+  </style>
+</head>
+<body>
+<div id="container"></div>
+<div id="controls">
+  <p>Simulation Status: <span id="status">Generating...</span></p>
+  <input type="range" id="timeSlider" min="0" max="100" value="0" style="width: 200px;">
+</div>
+
+<script type="text/javascript">
+ // 1. Create the base RenderWindow and Renderer
+const renderWindow = vtk.Rendering.Core.vtkRenderWindow.newInstance();
+const renderer = vtk.Rendering.Core.vtkRenderer.newInstance();
+renderWindow.addRenderer(renderer);
+
+// 2. Setup the HTML Container
+const container = document.querySelector('#container');
+
+// 3. Create the OpenGL View and link it to the Div
+const apiView = renderWindow.newAPISpecificView();
+apiView.setContainer(container);
+renderWindow.addView(apiView);
+
+// 4. Setup Interactor (Essential for mouse controls)
+const interactor = vtk.Rendering.Core.vtkRenderWindowInteractor.newInstance();
+interactor.setView(apiView);
+interactor.initialize();
+interactor.bindEvents(container);
+interactor.setInteractorStyle(vtk.Interaction.Style.vtkInteractorStyleTrackballCamera.newInstance());
+
+// 5. Add a 3D Object (A simple Cone)
+const coneSource = vtk.Filters.Sources.vtkConeSource.newInstance({ height: 1.0 });
+const mapper = vtk.Rendering.Core.vtkMapper.newInstance();
+const actor = vtk.Rendering.Core.vtkActor.newInstance();
+
+mapper.setInputConnection(coneSource.getOutputPort());
+actor.setMapper(mapper);
+renderer.addActor(actor);
+
+// 6. Handle Responsive Resizing (The "Fit Entirely" Logic)
+const resizeObserver = new ResizeObserver(() => {
+  const dims = container.getBoundingClientRect();
+  // Ensure we use integer pixels for the GL canvas
+  apiView.setSize(Math.floor(dims.width), Math.floor(dims.height));
+  renderWindow.render();
+});
+resizeObserver.observe(container);
+
+// Initial Render
+renderer.resetCamera();
+renderWindow.render();
+</script>
+</body>
+</html>

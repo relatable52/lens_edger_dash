@@ -10,17 +10,21 @@ from components import (
     two_d_preview_tab,
     three_d_prepare_tab,
     simulation_tab,
+    removal_simulation_tab,
     roughing_contour_tab
 )
 from callbacks import (
     register_preview_callback, 
     register_sidebar_callback, 
     register_simulation_callbacks,
-    register_roughing_callbacks
+    register_roughing_callbacks,
+    register_removal_simulation_callbacks
 )
 
 # --- APP SETUP ---
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.SPACELAB, "assets/style.css"], external_scripts=[])
+external_stylesheets = [dbc.themes.SPACELAB, "assets/style.css"]
+external_scripts = ['https://unpkg.com/vtk.js', "assets/vtk_setup.js"]
+app = dash.Dash(__name__, external_stylesheets=external_stylesheets, external_scripts=external_scripts)
 server = app.server
 
 # --- CONTROL SIDEBAR (Left Panel) ---
@@ -34,7 +38,10 @@ tab_2_content = three_d_prepare_tab.layout()
 
 tab_3_content = roughing_contour_tab.layout()
 
-tab_4_content = simulation_tab.layout()
+tab_4_content = dbc.Tabs([
+    dbc.Tab(simulation_tab.layout(), label="Motion Simulation", label_class_name="small-tab-title", id="tab-removal-sim"),
+    dbc.Tab(removal_simulation_tab.layout(), label="Removal Simulation", label_class_name="small-tab-title", id="tab-final-sim"), 
+])
 
 prepare_tab = dbc.Row([
     dbc.Col(prepare_sidebar_content, width=3),
@@ -71,9 +78,10 @@ app.layout = dbc.Container([
     dcc.Store(id='store-bevel-settings'), # Hidden store for bevel settings
     dcc.Store(id='store-simulation-path'), # Hidden store for full simulation path
     dcc.Store(id='store-eye-select', data='L'), # Hidden store for eye selection
-    # dcc.Store(id='store-roughing-results'), # Hidden store for roughing results
     dcc.Store(id='store-active-pass', data={'pass_index': 0, 'is_beveling': False}), # Active mesh pass for animation
     dcc.Interval(id='sim-interval', disabled=True, interval=100), # Interval for simulation updates
+    dcc.Interval(id='removal-sim-interval', disabled=True, interval=100), # Interval for removal simulation updates
+    html.Div(id="dummy-status-removal", style={"display": "none"}), # Dummy div for triggering callbacks
     dbc.Tabs([
         dbc.Tab(prepare_tab, label="Prepare Design", id="tab-prepare"),
         dbc.Tab(preview_tab, label="Preview & Simulate", id="tab-preview"),
@@ -92,6 +100,9 @@ register_simulation_callbacks(app)
 
 # Handle roughing cycle management
 register_roughing_callbacks(app)
+
+# Handle removal simulation (volume rendering)
+register_removal_simulation_callbacks(app)
 
 # @app.callback(
 #     Output("btn-save", "disabled"),
