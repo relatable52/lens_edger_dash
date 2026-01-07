@@ -48,7 +48,7 @@ def generate_lens_volume(
     xy_bounds_size = diameter_mm + 1
     z_bounds_size = back_radius - np.sqrt(back_radius**2 - (diameter_mm/2.0)**2) + center_thickness + 1
 
-    print(z_bounds_size)
+    # print(z_bounds_size)
     
     xy_dim = int(np.ceil(xy_bounds_size / resolution))
     z_dim = int(np.ceil(z_bounds_size / resolution))

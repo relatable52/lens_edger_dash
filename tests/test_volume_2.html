@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>VTK.js Isosurface Machining</title>
+  <script type="text/javascript" src="https://unpkg.com/vtk.js"></script>
+  <style>
+    body { margin: 0; padding: 0; overflow: hidden; font-family: sans-serif; background: #000; }
+    #container { width: 100vw; height: 100vh; }
+    #controls {
+      position: absolute; top: 20px; left: 20px;
+      background: rgba(40, 40, 40, 0.8); color: white; padding: 15px;
+      border-radius: 8px; z-index: 100; pointer-events: auto;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    input[type=range] { width: 200px; }
+  </style>
+</head>
+<body>
+<div id="container"></div>
+<div id="controls">
+  <h3>Isosurface Machining</h3>
+  <p>Status: <span id="status">Generating Lens...</span></p>
+  <label>Time Step:</label><br>
+  <input type="range" id="timeSlider" min="0" max="100" step="1" value="0">
+  <br><br>
+</div>
+
+<script type="text/javascript">
+  // --- 1. Parameters ---
+  const lensParams = {
+    R1: 500, R2: 100,
+    diameter: 70, thickness: 2,
+    // CRITICAL: Increased resolution size (lower quality) to prevent freezing 
+    // during mesh generation. Try 0.2 if your PC is fast.
+    resolution: 0.5, 
+    padding: 2
+  };
+
+  const toolParams = {
+    radius: 5.0,
+    depth: 1 
+  };
+
+  // --- 2. Setup VTK Environment ---
+  const fullScreenRenderer = vtk.Rendering.Misc.vtkFullScreenRenderWindow.newInstance({
+    rootContainer: document.querySelector('#container'),
+    background: [0.1, 0.1, 0.1], // Dark Grey Background
+  });
+  const renderer = fullScreenRenderer.getRenderer();
+  const renderWindow = fullScreenRenderer.getRenderWindow();
+
+  // --- 3. Generate Tool Path ---
+  function generateSpiralPath() {
+    const path = [];
+    const steps = 1000; 
+    const maxRadius = (lensParams.diameter / 2) + 2;
+    const revolutions = 6;
+    
+    for (let i = 0; i < steps; i++) {
+      const t = i / steps;
+      const r = maxRadius * (1 - t);
+      const theta = revolutions * 2 * Math.PI * t;
+      const x = r * Math.cos(theta);
+      const y = r * Math.sin(theta);
+      const z = (lensParams.thickness / 2) - toolParams.depth;
+      path.push([x, y, z]);
+    }
+    return path;
+  }
+  const toolPath = generateSpiralPath();
+  const MAX_TIME = toolPath.length;
+
+  // --- 4. Initialize Data Volume ---
+  const imageData = vtk.Common.DataModel.vtkImageData.newInstance();
+  
+  const bSize = lensParams.diameter + lensParams.padding;
+  const zSize = lensParams.R2 - Math.sqrt(lensParams.R2**2 - (lensParams.diameter/2)**2) + lensParams.padding;
+  const dimX = Math.ceil(bSize / lensParams.resolution);
+  const dimY = Math.ceil(bSize / lensParams.resolution);
+  const dimZ = Math.ceil(zSize / lensParams.resolution);
+  
+  imageData.setDimensions(dimX, dimY, dimZ);
+  imageData.setSpacing(lensParams.resolution, lensParams.resolution, lensParams.resolution);
+  imageData.setOrigin(
+    - (dimX * lensParams.resolution) / 2, 
+    - (dimY * lensParams.resolution) / 2, 
+    0
+  );
+
+  const numPoints = dimX * dimY * dimZ;
+  const dataArray = new Float32Array(numPoints); // The master array
+
+  // Pre-calculations
+  const zC1 = lensParams.R1;
+  const zC2 = lensParams.thickness + lensParams.R2;
+  const smoothEdge = lensParams.resolution * 1.5; // Slightly larger for cleaner mesh
+  const origin = imageData.getOrigin();
+  const spacing = imageData.getSpacing();
+
+  console.log(`Grid: ${dimX}x${dimY}x${dimZ} (${numPoints} voxels)`);
+
+  // --- Generate Base Lens ---
+  // We use 1000 as "Full Material" and 0 as "Air".
+  // The Isosurface will be drawn at 500.
+  for (let z = 0; z < dimZ; z++) {
+    const physZ = origin[2] + z * spacing[2];
+    for (let y = 0; y < dimY; y++) {
+      const physY = origin[1] + y * spacing[1];
+      for (let x = 0; x < dimX; x++) {
+        const physX = origin[0] + x * spacing[0];
+
+        const distCyl = Math.sqrt(physX*physX + physY*physY) - (lensParams.diameter/2);
+        const distSphere1 = Math.sqrt(physX*physX + physY*physY + (physZ - zC1)**2) - lensParams.R1;
+        const distSphere2 = lensParams.R2 - Math.sqrt(physX*physX + physY*physY + (physZ - zC2)**2);
+        const maxDist = Math.max(distCyl, distSphere1, distSphere2);
+
+        let density = 0;
+        if (maxDist < -smoothEdge) density = 1000;
+        else if (maxDist > smoothEdge) density = 0.0;
+        else density = 1000 * (1.0 - (maxDist + smoothEdge) / (2 * smoothEdge));
+
+        dataArray[x + y*dimX + z*dimX*dimY] = density;
+      }
+    }
+  }
+
+  // Attach data to VTK Object
+  const scalarArray = vtk.Common.Core.vtkDataArray.newInstance({ 
+    name: 'Scalars', 
+    values: dataArray 
+  });
+  imageData.getPointData().setScalars(scalarArray);
+
+  // --- 5. New Rendering Pipeline (Marching Cubes) ---
+  
+  // A. The Filter: Marching Cubes
+  // This takes the grid data and creates triangles where values cross 'contourValue'
+  const marchingCube = vtk.Filters.General.vtkImageMarchingCubes.newInstance({
+    contourValue: 500, // The "skin" is halfway between air(0) and material(1000)
+    computeNormals: true, // Needed for lighting
+    mergePoints: true, // False is faster for updates, True is smoother
+  });
+  marchingCube.setInputData(imageData);
+
+  // B. The Mapper: Maps triangles to graphics primitives
+  const mapper = vtk.Rendering.Core.vtkMapper.newInstance();
+  mapper.setInputConnection(marchingCube.getOutputPort());
+
+  // C. The Actor: Represents the object in the scene
+  const actor = vtk.Rendering.Core.vtkActor.newInstance();
+  actor.setMapper(mapper);
+  
+  // Style the actor (Shiny plastic look)
+  actor.getProperty().setColor(0.0, 0.8, 0.8); // Cyan
+  actor.getProperty().setSpecular(0.8);
+  actor.getProperty().setSpecularPower(30);
+  actor.getProperty().setAmbient(0.2);
+  actor.getProperty().setDiffuse(0.7);
+
+  renderer.addActor(actor);
+  renderer.resetCamera();
+  renderWindow.render();
+
+  // --- 6. Animation / Machining Logic ---
+  const slider = document.getElementById('timeSlider');
+  const status = document.getElementById('status');
+  slider.max = MAX_TIME;
+  const toolRadSq = toolParams.radius ** 2;
+
+  let currentTimeStep = 0;
+
+  function updateSimulation(targetTime) {
+    targetTime = Math.floor(targetTime);
+    if (targetTime === currentTimeStep) return;
+
+    // Optimization: Only iterate steps we haven't processed yet if moving forward
+    // If moving backward, we'd theoretically need to reset the lens, 
+    // but for this demo, we only cut. (To support rewind, you'd need a backup of dataArray).
+    
+    // For simplicity in this demo: We only support cutting forward. 
+    // If user drags slider back, nothing visually happens (cuts remain).
+    // To reset: reload page or implement a "reset" function to copy original buffer.
+    
+    const startStep = currentTimeStep;
+    const endStep = targetTime;
+
+    let modified = false;
+
+    // Iterate through the tool path steps involved in this time jump
+    for(let t = startStep; t < endStep; t++) {
+        if (!toolPath[t]) continue;
+        const pos = toolPath[t];
+        
+        // Bounding box for the tool at this step
+        const minX = Math.max(0, Math.floor((pos[0] - toolParams.radius - origin[0]) / spacing[0]));
+        const maxX = Math.min(dimX-1, Math.ceil((pos[0] + toolParams.radius - origin[0]) / spacing[0]));
+        const minY = Math.max(0, Math.floor((pos[1] - toolParams.radius - origin[1]) / spacing[1]));
+        const maxY = Math.min(dimY-1, Math.ceil((pos[1] + toolParams.radius - origin[1]) / spacing[1]));
+        const minZ = Math.max(0, Math.floor((pos[2] - 5 - origin[2]) / spacing[2]));
+        const maxZ = dimZ - 1;
+
+        for (let z = minZ; z <= maxZ; z++) {
+            const physZ = origin[2] + z * spacing[2];
+            // Tool depth check (simple flat end mill)
+            if (physZ < pos[2]) continue; 
+
+            for (let y = minY; y <= maxY; y++) {
+                const physY = origin[1] + y * spacing[1];
+                for (let x = minX; x <= maxX; x++) {
+                    const physX = origin[0] + x * spacing[0];
+                    const distSq = (physX - pos[0])**2 + (physY - pos[1])**2;
+                    const dist = Math.sqrt(distSq) - toolParams.radius;
+                    if (dist < - smoothEdge) {
+                        const idx = x + y*dimX + z*dimX*dimY;
+                        if (dataArray[idx] > 0) {
+                            dataArray[idx] = 0; 
+                            modified = true;
+                        }
+                    }
+                    else if (dist < smoothEdge) {
+                        const idx = x + y*dimX + z*dimX*dimY;
+                        const currentDensity = dataArray[idx];
+                        // Calculate smooth transition: closer to tool = more removal
+                        // dist ranges from -smoothEdge to +smoothEdge
+                        // t = 0 at inner edge (full removal), t = 1 at outer edge (no removal)
+                        const t = (dist + smoothEdge) / (2 * smoothEdge);
+                        const targetDensity = 1000 * t; // Material density at this distance
+                        const newDensity = Math.max(0, Math.min(currentDensity, targetDensity));
+                        if (newDensity < currentDensity) {
+                            dataArray[idx] = newDensity;
+                            modified = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    currentTimeStep = targetTime;
+
+    if (modified) {
+        // 1. Mark the array as modified so VTK knows data changed
+        imageData.getPointData().getScalars().modified();
+        // 2. Explicitly modify the dataset to trigger filters
+        imageData.modified(); 
+        // 3. Render
+        renderWindow.render();
+    }
+  }
+
+  status.innerText = "Ready";
+
+  // Auto-play Animation
+  let isPlaying = true;
+  let autoTime = 0;
+  
+  function animate() {
+    if(isPlaying && autoTime < MAX_TIME) {
+        autoTime += 2; // Steps per frame
+        slider.value = autoTime;
+        updateSimulation(autoTime);
+        requestAnimationFrame(animate);
+    }
+  }
+  
+  // Start
+  animate();
+
+  // Slider Interaction
+  slider.addEventListener('input', (e) => {
+    isPlaying = false; // Stop auto-play if user interacts
+    const t = parseFloat(e.target.value);
+    autoTime = t;
+    updateSimulation(t);
+  });
+
+</script>
+</body>
+</html>

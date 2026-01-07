@@ -3,6 +3,7 @@ import os
 import dash
 from dash import html, dcc
 import dash_bootstrap_components as dbc
+from dotenv import load_dotenv
 
 from components import (
     prepare_sidebar,
@@ -20,6 +21,8 @@ from callbacks import (
     register_roughing_callbacks,
     register_removal_simulation_callbacks
 )
+
+load_dotenv()
 
 # --- APP SETUP ---
 external_stylesheets = [dbc.themes.SPACELAB, "assets/style.css"]
