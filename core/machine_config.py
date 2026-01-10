@@ -28,7 +28,7 @@ def get_default_machine_config():
     """
     Returns the hardcoded configuration of the lens edging machine.
     """
-    # Spindle is tilted 15 degrees around Y, Base at (0,0,0)
+    # Spindle is tilted 18 degrees around Y
     tilt = 18.0
     base = [100.0, 0.0, -150.0]
     
@@ -56,10 +56,10 @@ def get_default_machine_config():
         mesh_filename="assets/bevel_rough.vtk",
         stack_z_offset=26.8,       # Stacked above Roughing
         height=17.0,
-        radius_bottom=48.0,        # V-shape simulation via cone? 
-        radius_top=48.0,           # Actually V-wheels are complex, let's use cylinder viz for now
-        cutting_radius=45.0,       # The V-groove is deeper
-        cutting_z_relative=7.5
+        radius_bottom=50.0,        # V-shape simulation via cone? 
+        radius_top=50.0,           # Actually V-wheels are complex, let's use cylinder viz for now
+        cutting_radius=58.0,       # The V-groove is deeper
+        cutting_z_relative=3.97
     ))
     
     return ToolStack(tilt, base, wheels)

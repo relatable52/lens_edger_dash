@@ -1,9 +1,13 @@
 from .sidebar_logic import register_sidebar_callback
 from .prepare_logic import register_preview_callback
 from .simulation_logic import register_simulation_callbacks
+from .roughing_logic import register_roughing_callbacks
+from .removal_simulation_logic import register_removal_simulation_callbacks
 
 __all__ = [
     'register_sidebar_callback',
     'register_preview_callback',
-    'register_simulation_callbacks'
+    'register_simulation_callbacks',
+    'register_roughing_callbacks',
+    'register_removal_simulation_callbacks'
 ]

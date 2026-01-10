@@ -242,13 +242,21 @@ class LensSimulationData:
     blank_mesh: MeshData
     cut_mesh: MeshData
     bevel_data: BevelData
+    blank_front_radius: Optional[float] = None
+    blank_back_radius: Optional[float] = None
+    blank_center_thickness: Optional[float] = None
+    blank_diameter: Optional[float] = None
     
     def to_dict(self):
         return {
             "side": self.side,
             "blank_mesh": self.blank_mesh.to_dict(),
             "cut_mesh": self.cut_mesh.to_dict(),
-            "bevel_data": self.bevel_data.to_dict()
+            "bevel_data": self.bevel_data.to_dict(),
+            "blank_front_radius": self.blank_front_radius,
+            "blank_back_radius": self.blank_back_radius,
+            "blank_center_thickness": self.blank_center_thickness,
+            "blank_diameter": self.blank_diameter
         }
 
     @staticmethod
@@ -258,7 +266,11 @@ class LensSimulationData:
             side=data['side'],
             blank_mesh=MeshData.from_dict(data['blank_mesh']),
             cut_mesh=MeshData.from_dict(data['cut_mesh']),
-            bevel_data=BevelData.from_dict(data['bevel_data'])
+            bevel_data=BevelData.from_dict(data['bevel_data']),
+            blank_front_radius=data.get('blank_front_radius'),
+            blank_back_radius=data.get('blank_back_radius'),
+            blank_center_thickness=data.get('blank_center_thickness'),
+            blank_diameter=data.get('blank_diameter')
         )
     
 @dataclass

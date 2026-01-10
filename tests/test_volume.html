@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>VTK.js Time-Stamped Machining</title>
+  <script type="text/javascript" src="https://unpkg.com/vtk.js"></script>
+  <style>
+    body { margin: 0; padding: 0; overflow: hidden; font-family: sans-serif; }
+    #container { width: 100vw; height: 100vh; }
+    #controls {
+      position: absolute; top: 20px; left: 20px;
+      background: rgba(0,0,0,0.7); color: white; padding: 10px;
+      border-radius: 5px; z-index: 100;
+    }
+  </style>
+</head>
+<body>
+<div id="container"></div>
+<div id="controls">
+  <p>Simulation Status: <span id="status">Generating...</span></p>
+  <input type="range" id="timeSlider" min="0" max="100" value="0" style="width: 200px;">
+</div>
+
+<script type="text/javascript">
+  // --- 1. Parameters ---
+  const lensParams = {
+    R1: 500, R2: 100,
+    diameter: 70, thickness: 2,
+    resolution: 0.1, // mm per voxel
+    padding: 2
+  };
+
+  const toolParams = {
+    radius: 5.0,
+    depth: 1 // Depth of cut into the surface
+  };
+
+  // --- 2. Setup VTK Environment ---
+  const fullScreenRenderer = vtk.Rendering.Misc.vtkFullScreenRenderWindow.newInstance({
+    rootContainer: document.querySelector('#container'),
+    background: [0.2, 0.2, 0.2],
+  });
+  const renderer = fullScreenRenderer.getRenderer();
+  const renderWindow = fullScreenRenderer.getRenderWindow();
+
+  // --- 3. Generate Tool Path ---
+  // We generate this FIRST so we know the max time step (N)
+  function generateSpiralPath() {
+    const path = [];
+    const steps = 1500; // Total time steps
+    const maxRadius = (lensParams.diameter / 2) + 2;
+    const revolutions = 6;
+    
+    for (let i = 0; i < steps; i++) {
+      const t = i / steps;
+      const r = maxRadius * (1 - t); // Spiral inwards
+      const theta = revolutions * 2 * Math.PI * t;
+      
+      const x = r * Math.cos(theta);
+      const y = r * Math.sin(theta);
+      // Cut slightly into the lens top surface
+      const z = (lensParams.thickness / 2) - toolParams.depth;
+      
+      path.push([x, y, z]);
+    }
+    return path;
+  }
+  const toolPath = generateSpiralPath();
+  const MAX_TIME = toolPath.length;
+  const MATERIAL_OFFSET = MAX_TIME + 10; // Offset to separate time values from density
+
+  // --- 4. Initialize Data Volume (Lens Generation) ---
+  const imageData = vtk.Common.DataModel.vtkImageData.newInstance();
+  
+  // Calculate grid size
+  const bSize = lensParams.diameter + lensParams.padding;
+  const zSize = lensParams.R2 - Math.sqrt(lensParams.R2**2 - (lensParams.diameter/2)**2) + lensParams.padding;
+  const dimX = Math.ceil(bSize / lensParams.resolution);
+  const dimY = Math.ceil(bSize / lensParams.resolution);
+  const dimZ = Math.ceil(zSize / lensParams.resolution);
+  
+  imageData.setDimensions(dimX, dimY, dimZ);
+  imageData.setSpacing(lensParams.resolution, lensParams.resolution, lensParams.resolution);
+  imageData.setOrigin(
+    - (dimX * lensParams.resolution) / 2, 
+    - (dimY * lensParams.resolution) / 2, 
+    0
+  );
+
+  const numPoints = dimX * dimY * dimZ;
+  const dataArray = new Float32Array(numPoints);
+
+  // Pre-calculations for lens shape
+  const zC1 = lensParams.R1;
+  const zC2 = lensParams.thickness+ lensParams.R2;
+  const smoothEdge = lensParams.resolution * 0;
+  const origin = imageData.getOrigin();
+  const spacing = imageData.getSpacing();
+
+  console.log("Generating Base Lens...");
+  console.log(`Grid dimensions: ${dimX} x ${dimY} x ${dimZ} = ${numPoints} voxels`);
+  const t0 = performance.now();
+
+  // PASS 1: Generate the static lens
+  // We store values as: MATERIAL_OFFSET + Density (0-100)
+  for (let z = 0; z < dimZ; z++) {
+    const physZ = origin[2] + z * spacing[2];
+    for (let y = 0; y < dimY; y++) {
+      const physY = origin[1] + y * spacing[1];
+      for (let x = 0; x < dimX; x++) {
+        const physX = origin[0] + x * spacing[0];
+
+        // Lens Logic (Same as before)
+        const distCyl = Math.sqrt(physX*physX + physY*physY) - (lensParams.diameter/2);
+        const distSphere1 = Math.sqrt(physX*physX + physY*physY + (physZ - zC1)**2) - lensParams.R1;
+        const distSphere2 = lensParams.R2 - Math.sqrt(physX*physX + physY*physY + (physZ - zC2)**2);
+        const maxDist = Math.max(distCyl, distSphere1, distSphere2);
+
+        let density = 0;
+        if (maxDist < -smoothEdge) density = 1000;
+        else if (maxDist > smoothEdge) density = 0.0;
+        else density = 1000 * (1.0 - (maxDist + smoothEdge) / (2 * smoothEdge));
+
+        const idx = x + y*dimX + z*dimX*dimY;
+        
+        if (density > 0) {
+          // Store density in the high range
+          dataArray[idx] = density + MATERIAL_OFFSET;
+        } else {
+          dataArray[idx] = 0; // Air
+        }
+      }
+    }
+  }
+  const t1 = performance.now();
+  console.log(`Base lens generated in ${(t1 - t0).toFixed(2)}ms`);
+
+  // --- 5. "Burn" the Tool Path (Time Stamping) ---
+  console.log(`Computing Cuts for ${toolPath.length} tool path steps...`);
+  const t2 = performance.now();
+
+  const toolRadSq = toolParams.radius ** 2;
+
+  // PASS 2: Iterate through time (the path)
+  toolPath.forEach((pos, timeStep) => {
+    // Progress indicator every 100 steps
+    if (timeStep % 100 === 0) {
+      console.log(`Processing step ${timeStep}/${toolPath.length} (${(timeStep/toolPath.length*100).toFixed(1)}%)`);
+    }
+    
+    // Time step starts at 1 (0 is reserved for air)
+    const tVal = timeStep + 1; 
+
+    // Bounding box optimization for the tool
+    const minX = Math.max(0, Math.floor((pos[0] - toolParams.radius - origin[0]) / spacing[0]));
+    const maxX = Math.min(dimX-1, Math.ceil((pos[0] + toolParams.radius - origin[0]) / spacing[0]));
+    const minY = Math.max(0, Math.floor((pos[1] - toolParams.radius - origin[1]) / spacing[1]));
+    const maxY = Math.min(dimY-1, Math.ceil((pos[1] + toolParams.radius - origin[1]) / spacing[1]));
+    
+    // We assume the tool cuts infinitely upwards (or specific depth).
+    // Here we treat it as a vertical mill cutting at the specific Z depth
+    // Ideally, check Z distance too if it's a ball mill.
+    // Let's iterate Z near the tool tip.
+    const minZ = Math.max(0, Math.floor((pos[2] - 10 - origin[2]) / spacing[2])); // 10mm safety depth
+    const maxZ = dimZ - 1; // Cut everything above? Or just local? Let's do local.
+    
+    for (let z = minZ; z <= maxZ; z++) {
+      const physZ = origin[2] + z * spacing[2];
+      
+      // Simple Cylindrical cutter check
+      // If voxel is ABOVE the tool tip (z > pos[2]), it might be cut.
+      // If voxel is BELOW the tool tip, it is safe.
+      if (physZ < pos[2]) continue; 
+
+      for (let y = minY; y <= maxY; y++) {
+        const physY = origin[1] + y * spacing[1];
+        for (let x = minX; x <= maxX; x++) {
+          const physX = origin[0] + x * spacing[0];
+
+          // Check radial distance
+          const distSq = (physX - pos[0])**2 + (physY - pos[1])**2;
+          
+          if (distSq <= toolRadSq) {
+            const idx = x + y*dimX + z*dimX*dimY;
+            const currentVal = dataArray[idx];
+
+            // Only cut if it's material ( > 100)
+            // AND if it hasn't been cut earlier (currentVal > tVal)
+            if (currentVal > 1000) {
+               // If it was "permanent" or "cut later", update it to "cut now"
+               // We only keep the EARLIEST cut time (min)
+               if (currentVal - 1000 > tVal) {
+                 dataArray[idx] = tVal + 1000;
+               }
+            }
+          }
+        }
+      }
+    }
+  });
+  const t3 = performance.now();
+  console.log(`Tool path computed in ${(t3 - t2).toFixed(2)}ms (${((t3-t2)/1000).toFixed(2)}s)`);
+  console.log(`Total computation time: ${((t3 - t0)/1000).toFixed(2)}s`);
+
+  // Attach scalar data to the volume
+  const scalarArray = vtk.Common.Core.vtkDataArray.newInstance({ 
+    name: 'Scalars', 
+    values: dataArray 
+  });
+  imageData.getPointData().setScalars(scalarArray);
+
+  // --- 6. Rendering Pipeline ---
+  console.log("Setting up rendering pipeline...");
+  const actor = vtk.Rendering.Core.vtkVolume.newInstance();
+  const mapper = vtk.Rendering.Core.vtkVolumeMapper.newInstance();
+  mapper.setInputData(imageData);
+  actor.setMapper(mapper);
+
+  // Lighting
+  actor.getProperty().setShade(true);
+  actor.getProperty().setAmbient(0.5);
+  actor.getProperty().setDiffuse(0.5);
+  actor.getProperty().setSpecular(0.5);
+  // Color Transfer Function
+  // We color everything cyan. 
+  // You could map low values (recently cut surface) to a different color if you wanted!
+  const cfun = vtk.Rendering.Core.vtkColorTransferFunction.newInstance();
+  cfun.addRGBPoint(0, 0, 0.8, 1.0); 
+  cfun.addRGBPoint(10000, 0.0, 0.8, 1.0);
+
+  // Simple Opacity Function
+  const ofun = vtk.Common.DataModel.vtkPiecewiseFunction.newInstance();
+  ofun.addPoint(0, 0.0); // Air is transparent
+  ofun.addPoint(999, 0.0); // Still transparent
+  ofun.addPoint(1000, 1.0); // Material is opaque
+  ofun.addPoint(10000, 1.0); // Material stays opaque
+  
+  actor.getProperty().setRGBTransferFunction(0, cfun);
+  actor.getProperty().setScalarOpacity(0, ofun);
+
+  renderer.addVolume(actor);
+  renderer.resetCamera();
+  const t4 = performance.now();
+  renderWindow.render();
+  const t5 = performance.now();
+  console.log(`Initial render took ${(t5 - t4).toFixed(2)}ms`);
+  console.log(`Total time from start: ${((t5 - t0)/1000).toFixed(2)}s`);
+
+  // --- 7. Animation Logic ---
+  const slider = document.getElementById('timeSlider');
+  const status = document.getElementById('status');
+  
+  // Set slider max
+  slider.max = MAX_TIME;
+  
+  // Keep track of the current state of voxel data
+  let currentTimeStep = 0;
+
+  function updateVoxelData(currentTime) {
+    // Update the actual voxel data by zeroing out cut voxels
+    const targetTime = Math.floor(currentTime);
+    
+    // Only update if time has advanced
+    if (targetTime === currentTimeStep) {
+      return;
+    }
+    
+    // For each voxel that was cut at this timestep, zero it out
+    toolPath.forEach((pos, timeStep) => {
+      // Only process cuts up to and including currentTime
+      if (timeStep + 1 > targetTime) return;
+      
+      // Only update voxels cut in this timestep (if advancing frame by frame)
+      // Or update all voxels up to currentTime
+      const tVal = timeStep + 1;
+      
+      const minX = Math.max(0, Math.floor((pos[0] - toolParams.radius - origin[0]) / spacing[0]));
+      const maxX = Math.min(dimX-1, Math.ceil((pos[0] + toolParams.radius - origin[0]) / spacing[0]));
+      const minY = Math.max(0, Math.floor((pos[1] - toolParams.radius - origin[1]) / spacing[1]));
+      const maxY = Math.min(dimY-1, Math.ceil((pos[1] + toolParams.radius - origin[1]) / spacing[1]));
+      const minZ = Math.max(0, Math.floor((pos[2] - 10 - origin[2]) / spacing[2]));
+      const maxZ = dimZ - 1;
+      
+      for (let z = minZ; z <= maxZ; z++) {
+        const physZ = origin[2] + z * spacing[2];
+        if (physZ < pos[2]) continue;
+        
+        for (let y = minY; y <= maxY; y++) {
+          const physY = origin[1] + y * spacing[1];
+          for (let x = minX; x <= maxX; x++) {
+            const physX = origin[0] + x * spacing[0];
+            const distSq = (physX - pos[0])**2 + (physY - pos[1])**2;
+            
+            if (distSq <= toolRadSq) {
+              const idx = x + y*dimX + z*dimX*dimY;
+              // Zero out the voxel data where cut occurs
+              dataArray[idx] = 0;
+            }
+          }
+        }
+      }
+    });
+    
+    // Update the scalar array on GPU
+    const scalarArray = vtk.Common.Core.vtkDataArray.newInstance({ name: 'Scalars', values: dataArray });
+    imageData.getPointData().setScalars(scalarArray);
+    
+    currentTimeStep = targetTime;
+    renderWindow.render();
+  }
+
+  // Initial Update
+  updateVoxelData(0);
+  status.innerText = "Ready";
+
+  // Auto-play
+  let time = 0;
+  function animate() {
+    time += 0.2; // Speed
+    if (time > MAX_TIME) time = 0; // Loop
+    
+    slider.value = time;
+    updateVoxelData(time);
+    requestAnimationFrame(animate);
+  }
+  
+  // Start animation
+  animate();
+
+  // Interactive Slider
+  slider.addEventListener('input', (e) => {
+    time = parseFloat(e.target.value);
+    updateVoxelData(time);
+  });
+
+</script>
+</body>
+</html>

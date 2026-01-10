@@ -38,6 +38,7 @@ def register_preview_callback(app):
     # Register callback to update Lens Blank Preview
     @app.callback(
         Output('vtk-container-3d-prepare', 'children'),
+        Output('store-eye-select', 'data'),
         Input('store-mesh-cache', 'data'),
         Input('store-oma-job', 'data'),
         Input('view-eye-select', 'value'),
@@ -46,4 +47,4 @@ def register_preview_callback(app):
     def update_3d_view(mesh_cache, oma_job, view_mode):
         lens_pair_sim_data = LensPairSimulationData.from_dict(mesh_cache) if mesh_cache else None
         oma_job = OMAJob.from_dict(oma_job) if oma_job else None
-        return three_d_prepare_tab.render_figure(lens_pair_sim_data, oma_job, view_mode)
+        return three_d_prepare_tab.render_figure(lens_pair_sim_data, oma_job, view_mode), view_mode

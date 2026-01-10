@@ -5,6 +5,7 @@ import numpy as np
 
 from core.machine_config import load_machine_config_cached, load_tool_mesh_cached
 from core.models.lenses import LensPairSimulationData
+from core.models.roughing import RoughingPassData
 
 def layout():
     """Returns the layout of the simulation tab."""
@@ -42,10 +43,19 @@ def render_simulation_scene(
     kinematics_path: dict, 
     frame_index: int,
     lens_pair_data: LensPairSimulationData,
+    roughing_results: list[RoughingPassData]=None,
     view_side: str = "L"
 ):
     """
-    Renders the simulation frame: Stationary Tools + Moving Lens.
+    Renders the simulation frame: Stationary Tools + All Moving Geometry (Roughing + Final Lens).
+    Meshes are pre-loaded with opacity controlled by clientside callback during animation.
+    
+    Args:
+        kinematics_path: Path data with x, z, theta, time arrays
+        frame_index: Current frame index
+        lens_pair_data: Lens geometry data
+        roughing_results: List of roughing results for visualization
+        view_side: "L" or "R"
     """
     # 1. Load Static Assets
     machine = load_machine_config_cached()
@@ -82,23 +92,77 @@ def render_simulation_scene(
             )
         )
 
-    # --- B. RENDER LENS ASSEMBLY (Moving) ---
+    # --- B. LOAD ALL MOVING GEOMETRY (Meshes with dynamic opacity) ---
     if kinematics_path and 'total_frames' in kinematics_path and lens_pair_data:
         
-        # 1. Get Current Pose
+        # 1. Get Current Pose (for initial position)
         idx = min(frame_index, kinematics_path['total_frames'] - 1)
         lens_x = kinematics_path['x'][idx]
         lens_z = kinematics_path['z'][idx]
-        lens_rot = kinematics_path['theta'][idx] # Degrees
+        lens_rot = kinematics_path['theta'][idx]
 
         # 2. Get Geometry for the specific side
         lens_data = lens_pair_data.left if view_side == "L" else lens_pair_data.right
         
         if lens_data:
-            # We bundle the Blank, Cut, and Bevel into one "Actor Group"
-            # Since Dash VTK doesn't have a Group node, we apply the same position/rotation to all
+            # Load all roughing pass meshes with pattern-matching IDs
+            if roughing_results:
+                for pass_idx, roughing_result in enumerate(roughing_results):
+                    if roughing_result.mesh is not None:
+                        mesh_data = roughing_result.mesh
+                        
+                        # First pass starts visible, others hidden
+                        initial_opacity = 1.0 if pass_idx == 0 else 0.0
+                        
+                        children_views.append(
+                            dash_vtk.GeometryRepresentation(
+                                id={'type': 'sim-lens-roughing-rep', 'index': pass_idx},
+                                actor={
+                                    "position": [lens_x, 0, lens_z],
+                                    "orientation": [0, 0, -lens_rot],
+                                },
+                                property={
+                                    "edgeVisibility": False,
+                                    "specular": 0.3,
+                                    "specularPower": 15,
+                                    "opacity": initial_opacity,
+                                    "color": [0.6, 0.6, 0.65],  # Gray for roughing
+                                },
+                                children=[
+                                    dash_vtk.PolyData(
+                                        points=mesh_data.points, 
+                                        polys=mesh_data.polys
+                                    )
+                                ]
+                            )
+                        )
             
-            # 2a. Raw Blank (Ghost)
+            # Load final cut lens (initially hidden during roughing)
+            color = [0.2, 0.6, 1.0] if view_side == "L" else [1.0, 0.6, 0.2]
+            children_views.append(
+                dash_vtk.GeometryRepresentation(
+                    id="sim-lens-cut-rep",
+                    actor={
+                        "position": [lens_x, 0, lens_z],
+                        "orientation": [0, 0, -lens_rot],
+                    },
+                    property={
+                        "edgeVisibility": False, 
+                        "specular": 0.5, 
+                        "specularPower": 20,
+                        "opacity": 0.0,  # Hidden during roughing
+                        "color": color,
+                    },
+                    children=[
+                        dash_vtk.PolyData(
+                            points=lens_data.cut_mesh.points, 
+                            polys=lens_data.cut_mesh.polys
+                        )
+                    ]
+                )
+            )
+
+            # Load blank lens
             children_views.append(
                 dash_vtk.GeometryRepresentation(
                     id = "sim-lens-blank-rep",
@@ -115,31 +179,6 @@ def render_simulation_scene(
                         dash_vtk.PolyData(
                             points=lens_data.blank_mesh.points, 
                             polys=lens_data.blank_mesh.polys
-                        )
-                    ]
-                )
-            )
-
-            # 2b. Cut Lens (Solid)
-            color = [0.2, 0.6, 1.0] if view_side == "L" else [1.0, 0.6, 0.2]
-            children_views.append(
-                dash_vtk.GeometryRepresentation(
-                    id="sim-lens-cut-rep",
-                    actor={
-                        "position": [lens_x, 0, lens_z],
-                        "orientation": [0, 0, -lens_rot],
-                    },
-                    property={
-                        "edgeVisibility": False, 
-                        "specular": 0.5, 
-                        "specularPower": 20,
-                        "opacity": 1,
-                        "color": color,
-                    },
-                    children=[
-                        dash_vtk.PolyData(
-                            points=lens_data.cut_mesh.points, 
-                            polys=lens_data.cut_mesh.polys
                         )
                     ]
                 )

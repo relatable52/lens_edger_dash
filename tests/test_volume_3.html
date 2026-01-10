@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>VTK.js Anisotropic Machining</title>
+  <script type="text/javascript" src="https://unpkg.com/vtk.js"></script>
+  <style>
+    body { margin: 0; padding: 0; overflow: hidden; font-family: sans-serif; background: #000; }
+    #container { width: 100vw; height: 100vh; }
+    #controls {
+      position: absolute; top: 20px; left: 20px;
+      background: rgba(40, 40, 40, 0.8); color: white; padding: 15px;
+      border-radius: 8px; z-index: 100;
+    }
+    input[type=range] { width: 200px; }
+  </style>
+</head>
+<body>
+<div id="container"></div>
+<div id="controls">
+  <h3>Anisotropic Grid</h3>
+  <p>Status: <span id="status">Generating...</span></p>
+  <p style="font-size: 0.8em; color: #aaa;">
+    Resolution:<br>
+    X/Y: 0.4mm (Fast)<br>
+    Z: 0.2mm (Precise)
+  </p>
+  <label>Time Step:</label><br>
+  <input type="range" id="timeSlider" min="0" max="100" step="1" value="0">
+</div>
+
+<script type="text/javascript">
+  // --- 1. Parameters ---
+  const lensParams = {
+    R1: 500, R2: 100,
+    diameter: 70, thickness: 2,
+    padding: 2,
+    // SEPARATE RESOLUTIONS
+    resXY: 0.5, // Coarse horizontally
+    resZ:  0.2  // Fine vertically
+  };
+
+  const toolParams = { radius: 8.0, depth: 1 };
+
+  // --- 2. Setup VTK Environment ---
+  const fullScreenRenderer = vtk.Rendering.Misc.vtkFullScreenRenderWindow.newInstance({
+    rootContainer: document.querySelector('#container'),
+    background: [0.1, 0.1, 0.1],
+  });
+  const renderer = fullScreenRenderer.getRenderer();
+  const renderWindow = fullScreenRenderer.getRenderWindow();
+
+  // --- 3. Generate Tool Path ---
+  function generateSpiralPath() {
+    const path = [];
+    const steps = 1000; 
+    const maxRadius = (lensParams.diameter / 2) + 2;
+    const revolutions = 6;
+    for (let i = 0; i < steps; i++) {
+      const t = i / steps;
+      const r = maxRadius * (1 - t);
+      const theta = revolutions * 2 * Math.PI * t;
+      path.push([
+        r * Math.cos(theta),
+        r * Math.sin(theta),
+        (lensParams.thickness / 2) - toolParams.depth
+      ]);
+    }
+    return path;
+  }
+  const toolPath = generateSpiralPath();
+  const MAX_TIME = toolPath.length;
+
+  // --- 4. Initialize Anisotropic Data Volume ---
+  const imageData = vtk.Common.DataModel.vtkImageData.newInstance();
+  
+  const bSize = lensParams.diameter + lensParams.padding;
+  const zSize = lensParams.R2 - Math.sqrt(lensParams.R2**2 - (lensParams.diameter/2)**2) + lensParams.padding;
+  
+  // Calculate dimensions independently
+  const dimX = Math.ceil(bSize / lensParams.resXY);
+  const dimY = Math.ceil(bSize / lensParams.resXY);
+  const dimZ = Math.ceil(zSize / lensParams.resZ);
+  
+  imageData.setDimensions(dimX, dimY, dimZ);
+  
+  // CRITICAL: Set the non-uniform spacing here
+  imageData.setSpacing(lensParams.resXY, lensParams.resXY, lensParams.resZ);
+  
+  // Center the origin based on dimensions * specific spacing
+  imageData.setOrigin(
+    - (dimX * lensParams.resXY) / 2, 
+    - (dimY * lensParams.resXY) / 2, 
+    0
+  );
+
+  const numPoints = dimX * dimY * dimZ;
+  const dataArray = new Float32Array(numPoints);
+  
+  // Convenience for later
+  const origin = imageData.getOrigin();
+  const spacing = imageData.getSpacing(); // Returns [0.5, 0.5, 0.1]
+
+  console.log(`Grid: ${dimX}x${dimY}x${dimZ} (${numPoints} voxels)`);
+  console.log(`Spacing: ${spacing}`);
+
+  // --- Generate Base Lens ---
+  const zC1 = lensParams.R1;
+  const zC2 = lensParams.thickness + lensParams.R2;
+  // Use the XY resolution for edge smoothing calculation
+  const smoothEdge = lensParams.resXY * 1.5; 
+
+  for (let z = 0; z < dimZ; z++) {
+    const physZ = origin[2] + z * spacing[2]; // Use Z spacing
+    for (let y = 0; y < dimY; y++) {
+      const physY = origin[1] + y * spacing[1]; // Use Y spacing
+      for (let x = 0; x < dimX; x++) {
+        const physX = origin[0] + x * spacing[0]; // Use X spacing
+
+        const distCyl = Math.sqrt(physX*physX + physY*physY) - (lensParams.diameter/2);
+        const distSphere1 = Math.sqrt(physX*physX + physY*physY + (physZ - zC1)**2) - lensParams.R1;
+        const distSphere2 = lensParams.R2 - Math.sqrt(physX*physX + physY*physY + (physZ - zC2)**2);
+        const maxDist = Math.max(distCyl, distSphere1, distSphere2);
+
+        let density = 0;
+        if (maxDist < -smoothEdge) density = 1000;
+        else if (maxDist > smoothEdge) density = 0.0;
+        else density = 1000 * (1.0 - (maxDist + smoothEdge) / (2 * smoothEdge));
+
+        dataArray[x + y*dimX + z*dimX*dimY] = density;
+      }
+    }
+  }
+
+  const scalarArray = vtk.Common.Core.vtkDataArray.newInstance({ name: 'Scalars', values: dataArray });
+  imageData.getPointData().setScalars(scalarArray);
+
+  // --- 5. Rendering Pipeline ---
+  const marchingCube = vtk.Filters.General.vtkImageMarchingCubes.newInstance({
+    contourValue: 999,
+    computeNormals: true,
+    mergePoints: true, 
+  });
+  marchingCube.setInputData(imageData);
+
+  const mapper = vtk.Rendering.Core.vtkMapper.newInstance();
+  mapper.setInputConnection(marchingCube.getOutputPort());
+
+  const actor = vtk.Rendering.Core.vtkActor.newInstance();
+  actor.setMapper(mapper);
+  actor.getProperty().setColor(0.0, 0.8, 0.8);
+  actor.getProperty().setSpecular(0.8);
+  actor.getProperty().setDiffuse(0.7);
+
+  renderer.addActor(actor);
+  renderer.resetCamera();
+  renderWindow.render();
+
+  // --- 6. Machining Logic (Anisotropic) ---
+  const slider = document.getElementById('timeSlider');
+  const status = document.getElementById('status');
+  slider.max = MAX_TIME;
+  let currentTimeStep = 0;
+
+  function updateSimulation(targetTime) {
+    targetTime = Math.floor(targetTime);
+    if (targetTime === currentTimeStep) return;
+
+    const startStep = currentTimeStep;
+    const endStep = targetTime;
+    let modified = false;
+
+    for(let t = startStep; t < endStep; t++) {
+        if (!toolPath[t]) continue;
+        const pos = toolPath[t];
+        
+        // --- Bounding Box Optimization (Anisotropic) ---
+        // Notice we divide by spacing[0], spacing[1], spacing[2] separately
+        const minX = Math.max(0, Math.floor((pos[0] - toolParams.radius - origin[0]) / spacing[0]));
+        const maxX = Math.min(dimX-1, Math.ceil((pos[0] + toolParams.radius - origin[0]) / spacing[0]));
+        const minY = Math.max(0, Math.floor((pos[1] - toolParams.radius - origin[1]) / spacing[1]));
+        const maxY = Math.min(dimY-1, Math.ceil((pos[1] + toolParams.radius - origin[1]) / spacing[1]));
+        const minZ = Math.max(0, Math.floor((pos[2] - 5 - origin[2]) / spacing[2]));
+        const maxZ = dimZ - 1;
+
+        for (let z = minZ; z <= maxZ; z++) {
+            const physZ = origin[2] + z * spacing[2];
+            if (physZ < pos[2]) continue; 
+
+            for (let y = minY; y <= maxY; y++) {
+                const physY = origin[1] + y * spacing[1];
+                for (let x = minX; x <= maxX; x++) {
+                    const physX = origin[0] + x * spacing[0];
+                    
+                    const distSq = (physX - pos[0])**2 + (physY - pos[1])**2;
+                    const dist = Math.sqrt(distSq) - toolParams.radius;
+                    
+                    // Logic remains the same, but uses anisotropic density points
+                    if (dist < - smoothEdge) {
+                        const idx = x + y*dimX + z*dimX*dimY;
+                        if (dataArray[idx] > 0) {
+                            dataArray[idx] = 0; 
+                            modified = true;
+                        }
+                    } else if (dist < smoothEdge) {
+                         const idx = x + y*dimX + z*dimX*dimY;
+                         const currentDensity = dataArray[idx];
+                         const t = (dist + smoothEdge) / (2 * smoothEdge);
+                         const targetDensity = 1000 * t;
+                         const newDensity = Math.max(0, Math.min(currentDensity, targetDensity));
+                         if (newDensity < currentDensity) {
+                             dataArray[idx] = newDensity;
+                             modified = true;
+                         }
+                    }
+                }
+            }
+        }
+    }
+
+    currentTimeStep = targetTime;
+
+    if (modified) {
+        imageData.getPointData().getScalars().modified();
+        imageData.modified(); 
+        renderWindow.render();
+    }
+  }
+
+  status.innerText = "Ready";
+
+  let isPlaying = true;
+  let autoTime = 0;
+  function animate() {
+    if(isPlaying && autoTime < MAX_TIME) {
+        autoTime += 2; 
+        slider.value = autoTime;
+        updateSimulation(autoTime);
+        requestAnimationFrame(animate);
+    }
+  }
+  animate();
+
+  slider.addEventListener('input', (e) => {
+    isPlaying = false; 
+    const t = parseFloat(e.target.value);
+    autoTime = t;
+    updateSimulation(t);
+  });
+
+</script>
+</body>
+</html>
