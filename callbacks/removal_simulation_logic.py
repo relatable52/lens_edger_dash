@@ -3,6 +3,7 @@ import numpy as np
 
 from core.models.lenses import LensPairSimulationData
 from core.geometric.lens_volume import generate_lens_volume, generate_machined_lens_volume
+from core.machine_config import load_machine_config_cached, load_tool_mesh_cached
 
 def register_removal_simulation_callbacks(app):
     """
@@ -40,7 +41,7 @@ def register_removal_simulation_callbacks(app):
         function(n_intervals, current_val, max_val) {
             if (!max_val) return current_val;
             // Advance by 0.1 seconds per interval (assuming 10Hz interval)
-            let new_val = current_val + 0.5;
+            let new_val = current_val + 0.2;
             if (new_val > max_val) {
                 return 0;
             }
@@ -134,6 +135,117 @@ def register_removal_simulation_callbacks(app):
         Output('dummy-status-removal', 'children', allow_duplicate=True),
         Input('removal-sim-slider', 'value'),
         State('removal-sim-slider', 'max'),
+        prevent_initial_call=True
+    )
+
+    # --- 5. GENERATE TOOL MESH DATA FOR VTK.JS ---
+    @app.callback(
+        Output('store-removal-tools', 'data'),
+        Input('store-lens-volume', 'data'),
+        prevent_initial_call=True
+    )
+    def generate_tool_data(lens_volume_data):
+        """Generate serialized tool mesh data for VTK.js rendering."""
+        if not lens_volume_data:
+            return no_update
+        
+        machine = load_machine_config_cached()
+        tool_meshes = load_tool_mesh_cached()
+        
+        # Convert machine tilt to radians for position calculation
+        tilt_rad = np.deg2rad(machine.tilt_angle_deg)
+        sin_t = np.sin(tilt_rad)
+        cos_t = np.cos(tilt_rad)
+        
+        tools_data = []
+        for wheel in machine.wheels:
+            if wheel.tool_id not in tool_meshes:
+                continue
+            
+            pts, polys = tool_meshes[wheel.tool_id]
+            
+            # Calculate global position based on stack offset and tilt
+            z_local = wheel.stack_z_offset
+            pos_x = machine.base_position[0] - (z_local * sin_t)
+            pos_y = machine.base_position[1]
+            pos_z = machine.base_position[2] + (z_local * cos_t)
+            
+            tools_data.append({
+                "tool_id": wheel.tool_id,
+                "points": pts.tolist() if hasattr(pts, 'tolist') else list(pts),
+                "polys": polys.tolist() if hasattr(polys, 'tolist') else list(polys),
+                "position": [pos_x, pos_y, pos_z],
+                "tilt_angle": machine.tilt_angle_deg
+            })
+        
+        return tools_data
+
+    # --- 6. LOAD TOOL MESHES INTO VTK SCENE ---
+    clientside_callback(
+        """
+        function(tools_data) {
+            if (!tools_data) return window.dash_clientside.no_update;
+            
+            // Wait for vtkManager to be initialized
+            if (window.vtkManager && window.vtkManager.isInitialized) {
+                window.vtkManager.loadToolMeshes(tools_data);
+                window.vtkManager.addGroundPlane();
+            } else {
+                // Retry after a short delay if not initialized yet
+                setTimeout(function() {
+                    if (window.vtkManager && window.vtkManager.isInitialized) {
+                        window.vtkManager.loadToolMeshes(tools_data);
+                        window.vtkManager.addGroundPlane();
+                    }
+                }, 500);
+            }
+            
+            return "Tools loaded: " + tools_data.length;
+        }
+        """,
+        Output('dummy-status-removal-tools', 'children'),
+        Input('store-removal-tools', 'data'),
+        prevent_initial_call=True
+    )
+
+    # --- 7. UPDATE LENS TRANSFORM BASED ON SLIDER (Movement Animation) ---
+    clientside_callback(
+        """
+        function(slider_time, path_data) {
+            // Safety checks
+            if (!path_data || !path_data.x || !window.vtkManager || !window.vtkManager.isInitialized) {
+                return window.dash_clientside.no_update;
+            }
+
+            // Find frame index based on time
+            let frame_idx = 0;
+            if (path_data.time && path_data.time.length > 0) {
+                for (let i = 0; i < path_data.time.length; i++) {
+                    if (path_data.time[i] <= slider_time) {
+                        frame_idx = i;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            
+            // Ensure within bounds
+            frame_idx = Math.max(0, Math.min(frame_idx, path_data.x.length - 1));
+
+            // Get coordinates for lens position
+            const x = path_data.x[frame_idx];
+            const z = path_data.z[frame_idx];
+            const theta = path_data.theta[frame_idx];
+
+            // Update lens transform in VTK scene
+            window.vtkManager.updateLensTransform(x, z, -theta);
+
+            return "Transform: x=" + x.toFixed(2) + " z=" + z.toFixed(2) + " θ=" + theta.toFixed(1);
+        }
+        """,
+        Output('dummy-status-removal-transform', 'children'),
+        Input('removal-sim-slider', 'value'),
+        State('store-simulation-path', 'data'),
         prevent_initial_call=True
     )
     

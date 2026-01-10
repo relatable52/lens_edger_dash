@@ -20,9 +20,13 @@ def layout():
             ),
             # Hidden store for volume data
             dcc.Store(id='store-lens-volume'),
+            # Hidden store for tool mesh data
+            dcc.Store(id='store-removal-tools'),
             # Hidden dummy outputs for clientside callbacks
             html.Div(id='dummy-status-removal', style={'display': 'none'}),
             html.Div(id='dummy-status-removal-2', style={'display': 'none'}),
+            html.Div(id='dummy-status-removal-tools', style={'display': 'none'}),
+            html.Div(id='dummy-status-removal-transform', style={'display': 'none'}),
             # Controls
             dbc.Row([
                 dbc.Col(dbc.Button("Play/Pause", id="removal-sim-play", color="primary", size="sm"), width="auto"),
@@ -36,6 +40,6 @@ def layout():
                 )
             ], class_name="align-items-center mt-3 bg-light p-2 rounded"),
             # Interval component for animation
-            dcc.Interval(id='removal-sim-interval', interval=500, disabled=True)
+            dcc.Interval(id='removal-sim-interval', interval=200, disabled=True)
         ]), className="mt-3"
     )

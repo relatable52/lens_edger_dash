@@ -117,4 +117,100 @@ window.vtkManager = {
         marchingCube.setContourValue(1000 - time_length + value);
         renderWindow.render();
     },
+
+    loadToolMeshes: function(toolsData) {
+        if (!this.isInitialized || !toolsData) return;
+        const { renderer, renderWindow } = this.components;
+
+        // Clear existing tool actors
+        if (this.toolActors) {
+            this.toolActors.forEach(actor => renderer.removeActor(actor));
+        }
+        this.toolActors = [];
+
+        // Create actors for each tool
+        toolsData.forEach(tool => {
+            // Create polydata from points and polys
+            const polydata = vtk.Common.DataModel.vtkPolyData.newInstance();
+            
+            // Set points
+            const points = vtk.Common.Core.vtkPoints.newInstance();
+            const pointsArray = new Float32Array(tool.points);
+            points.setData(pointsArray, 3);
+            polydata.setPoints(points);
+
+            // Set polys (cell connectivity)
+            const polys = vtk.Common.Core.vtkCellArray.newInstance();
+            const polysArray = new Uint32Array(tool.polys);
+            polys.setData(polysArray);
+            polydata.setPolys(polys);
+
+            // Create mapper
+            const mapper = vtk.Rendering.Core.vtkMapper.newInstance();
+            mapper.setInputData(polydata);
+
+            // Create actor
+            const actor = vtk.Rendering.Core.vtkActor.newInstance();
+            actor.setMapper(mapper);
+            
+            // Set position and orientation
+            actor.setPosition(tool.position[0], tool.position[1], tool.position[2]);
+            actor.rotateY(-tool.tilt_angle);  // Apply tilt
+
+            // Set material properties
+            const property = actor.getProperty();
+            property.setColor(0.7, 0.7, 0.7);  // Gray color for tools
+            property.setSpecular(0.4);
+            property.setSpecularPower(20);
+            property.setAmbient(0.2);
+            property.setDiffuse(0.8);
+
+            renderer.addActor(actor);
+            this.toolActors.push(actor);
+        });
+
+        renderWindow.render();
+        console.log("Tool meshes loaded:", toolsData.length, "tools");
+    },
+
+    updateLensTransform: function(x, z, theta) {
+        if (!this.isInitialized) return;
+        const { actor, renderWindow } = this.components;
+
+        // Reset orientation first
+        actor.setOrientation(0, 0, theta);
+        
+        // Set position (x, y=0, z)
+        actor.setPosition(x, 0, z);
+    
+
+        renderWindow.render();
+    },
+
+    // Helper to add a ground plane for reference
+    addGroundPlane: function() {
+        if (!this.isInitialized) return;
+        const { renderer, renderWindow } = this.components;
+
+        const planeSource = vtk.Filters.Sources.vtkPlaneSource.newInstance({
+            xResolution: 1,
+            yResolution: 1,
+        });
+        planeSource.setOrigin(-200, -200, -200);
+        planeSource.setPoint1(200, -200, -200);
+        planeSource.setPoint2(-200, 200, -200);
+
+        const mapper = vtk.Rendering.Core.vtkMapper.newInstance();
+        mapper.setInputConnection(planeSource.getOutputPort());
+
+        const actor = vtk.Rendering.Core.vtkActor.newInstance();
+        actor.setMapper(mapper);
+        
+        const property = actor.getProperty();
+        property.setColor(0.7, 0.7, 0.7);
+        property.setOpacity(0.4);
+
+        renderer.addActor(actor);
+        renderWindow.render();
+    },
 };
