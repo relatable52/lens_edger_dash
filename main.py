@@ -1,4 +1,5 @@
 import os
+from dotenv import load_dotenv, find_dotenv
 
 import dash
 from dash import html, dcc
@@ -114,9 +115,13 @@ register_removal_simulation_callbacks(app)
 #     # This would trigger the calculation logic
 #     return False
 
+load_dotenv(find_dotenv())
+DEV_ENV = True if os.getenv("DEV_ENV", "False") == "True" else False
+
 if __name__ == "__main__":
     # Get the PORT from the environment (default to 8050 if not set)
     port = int(os.environ.get("PORT", 8050))
+    debug = os.environ.get("DEV_ENV", False)
     
     # Host must be 0.0.0.0 to be accessible externally
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=debug)
