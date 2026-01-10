@@ -21,37 +21,28 @@ window.vtkManager = {
         interactor.bindEvents(container);
         interactor.setInteractorStyle(vtk.Interaction.Style.vtkInteractorStyleTrackballCamera.newInstance());
 
-        // 1. Create Actor and Mapper
-        const volume = vtk.Rendering.Core.vtkVolume.newInstance();
-        const mapper = vtk.Rendering.Core.vtkVolumeMapper.newInstance();
-        volume.setMapper(mapper);
+        // 1. Create Marching Cubes Filter (Isosurface Extraction)
+        const marchingCube = vtk.Filters.General.vtkImageMarchingCubes.newInstance({
+            contourValue: 500,        // Surface drawn at halfway point (0-1000 range)
+            computeNormals: true,      // Required for proper lighting
+            mergePoints: true          // Smoother mesh
+        });
 
-        // 2. CONFIGURE SHADING PROPERTIES
-        const property = volume.getProperty();
-        
-        // Enable shading (this tells VTK to use the light sources)
-        property.setShade(true);
-        
-        // Material Properties (Adjust these for your lens material)
-        property.setAmbient(0.5);       // Base light (0.0 - 1.0)
-        property.setDiffuse(0.5);       // Matte surface lighting
-        property.setSpecular(0.5);      // Shiny highlights
-        property.setSpecularPower(3);  // How sharp the highlight is (higher = sharper)
-        
-        // Critical for smooth look
-        property.setInterpolationTypeToLinear();
+        // 2. Create Mapper (connects filter output to actor)
+        const mapper = vtk.Rendering.Core.vtkMapper.newInstance();
+        mapper.setInputConnection(marchingCube.getOutputPort());
 
-        // 3. Setup default Opacity/Color (otherwise shading is hard to see)
-        const ofun = vtk.Common.DataModel.vtkPiecewiseFunction.newInstance();
-        ofun.addPoint(0, 0.0);
-        ofun.addPoint(90, 0.0);
-        ofun.addPoint(100, 0.3); // Adjust based on your lens scalar range
-        property.setScalarOpacity(0, ofun);
-
-        const cfun = vtk.Rendering.Core.vtkColorTransferFunction.newInstance();
-        cfun.addRGBPoint(0, 0, 0, 0);
-        cfun.addRGBPoint(100, 0.5, 0.8, 1.0); // Light blue/cyan for lens
-        property.setRGBTransferFunction(0, cfun);
+        // 3. Create Actor (the visible object)
+        const actor = vtk.Rendering.Core.vtkActor.newInstance();
+        actor.setMapper(mapper);
+        
+        // 4. Configure Material Properties (like test_volume_2.html)
+        const property = actor.getProperty();
+        property.setColor(0.0, 0.8, 0.8);    // Cyan color
+        property.setSpecular(0.8);            // Shiny highlights
+        property.setSpecularPower(30);        // Sharp highlights
+        property.setAmbient(0.2);             // Base ambient light
+        property.setDiffuse(0.7);             // Matte surface lighting
 
         // Store references
         this.components = {
@@ -59,11 +50,12 @@ window.vtkManager = {
             renderer,
             apiView,
             interactor,
-            volume,
-            mapper
+            actor,
+            mapper,
+            marchingCube
         };
 
-        renderer.addVolume(volume);
+        renderer.addActor(actor);
         
         // Add a default light so the shading isn't just black
         // renderer.createLight(); 
@@ -83,23 +75,31 @@ window.vtkManager = {
 
     updateData: function(volume_data) {
         if (!this.isInitialized) return;
-        const { mapper, renderWindow, renderer } = this.components;
+        const { marchingCube, renderWindow, renderer } = this.components;
 
-        const imageData = vtk.Common.DataModel.vtkImageData.newInstance();
-        imageData.setDimensions(...volume_data.dimensions);
-        imageData.setSpacing(...volume_data.spacing);
-        imageData.setOrigin(...volume_data.origin);
+        // Store or create imageData
+        if (!this.imageData) {
+            this.imageData = vtk.Common.DataModel.vtkImageData.newInstance();
+        }
+        
+        this.imageData.setDimensions(...volume_data.dimensions);
+        this.imageData.setSpacing(...volume_data.spacing);
+        this.imageData.setOrigin(...volume_data.origin);
 
         const scalarArray = vtk.Common.Core.vtkDataArray.newInstance({
             name: 'Scalars',
             values: new Float32Array(volume_data.scalars),
         });
-        imageData.getPointData().setScalars(scalarArray);
+        this.imageData.getPointData().setScalars(scalarArray);
 
-        console.log(imageData);
+        // Store reference for tool cutting
+        this.dataArray = volume_data.scalars;
+        this.dimensions = volume_data.dimensions;
+        this.spacing = volume_data.spacing;
+        this.origin = volume_data.origin;
         
-        // Just swap the data, don't recreate the whole scene
-        mapper.setInputData(imageData);
+        // Feed to marching cubes
+        marchingCube.setInputData(this.imageData);
         
         // Reset camera only if it's the first data load
         if (!this.hasData) {
@@ -108,5 +108,13 @@ window.vtkManager = {
         }
         
         renderWindow.render();
-    }
+    },
+
+    setContourValue: function(value, time_length) {
+        if (!this.isInitialized) return;
+        const { marchingCube, renderWindow } = this.components;
+        
+        marchingCube.setContourValue(1000 - time_length + value);
+        renderWindow.render();
+    },
 };

@@ -28,7 +28,7 @@ def get_default_machine_config():
     """
     Returns the hardcoded configuration of the lens edging machine.
     """
-    # Spindle is tilted 15 degrees around Y, Base at (0,0,0)
+    # Spindle is tilted 18 degrees around Y
     tilt = 18.0
     base = [100.0, 0.0, -150.0]
     

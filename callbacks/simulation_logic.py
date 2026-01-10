@@ -82,6 +82,7 @@ def register_simulation_callbacks(app):
                 # Record breakpoint if this is a roughing or beveling step
                 if step.operation_type in ['roughing', 'beveling']:
                     pass_time_breaks.append({
+                        'start_time': float(cumulative_time - step_duration),
                         'end_time': float(cumulative_time),
                         'pass_index': int(step.pass_index),
                         'operation_type': step.operation_type
@@ -271,19 +272,19 @@ def register_simulation_callbacks(app):
         """
         function(slider_time, path_data) {
             if (!path_data || !path_data.time) {
-                return {pass_index: 0, is_beveling: false};
+                return {pass_index: 0, is_beveling: true};
             }
 
             // Use actual timing metadata from path_data
             if (!path_data.pass_time_breaks || path_data.pass_time_breaks.length === 0) {
                 // Fallback to old behavior if metadata not available
                 const total_time = path_data.time[path_data.time.length - 1];
-                return {pass_index: 0, is_beveling: false};
+                return {pass_index: 0, is_beveling: true};
             }
 
             // Find which pass the slider_time falls into using cumulative timing
             let current_pass = 0;
-            let is_beveling = false;
+            let is_beveling = true;
             
             for (let i = 0; i < path_data.pass_time_breaks.length; i++) {
                 const breakpoint = path_data.pass_time_breaks[i];

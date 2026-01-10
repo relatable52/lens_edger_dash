@@ -83,8 +83,6 @@ app.layout = dbc.Container([
     dcc.Store(id='store-eye-select', data='L'), # Hidden store for eye selection
     dcc.Store(id='store-active-pass', data={'pass_index': 0, 'is_beveling': False}), # Active mesh pass for animation
     dcc.Interval(id='sim-interval', disabled=True, interval=100), # Interval for simulation updates
-    dcc.Interval(id='removal-sim-interval', disabled=True, interval=100), # Interval for removal simulation updates
-    html.Div(id="dummy-status-removal", style={"display": "none"}), # Dummy div for triggering callbacks
     dbc.Tabs([
         dbc.Tab(prepare_tab, label="Prepare Design", id="tab-prepare"),
         dbc.Tab(preview_tab, label="Preview & Simulate", id="tab-preview"),

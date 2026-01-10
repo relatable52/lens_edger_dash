@@ -20,17 +20,22 @@ def layout():
             ),
             # Hidden store for volume data
             dcc.Store(id='store-lens-volume'),
+            # Hidden dummy outputs for clientside callbacks
+            html.Div(id='dummy-status-removal', style={'display': 'none'}),
+            html.Div(id='dummy-status-removal-2', style={'display': 'none'}),
             # Controls
             dbc.Row([
                 dbc.Col(dbc.Button("Play/Pause", id="removal-sim-play", color="primary", size="sm"), width="auto"),
                 dbc.Col(
                     dcc.Slider(
-                        id="removal-sim-slider", min=0, max=100, step=1, value=0,
+                        id="removal-sim-slider", min=0, max=100, step=0.1, value=0,
                         marks=None,
                         tooltip={"placement": "bottom", "always_visible": True}
                     ),
                     className="pt-2"
                 )
-            ], class_name="align-items-center mt-3 bg-light p-2 rounded")
+            ], class_name="align-items-center mt-3 bg-light p-2 rounded"),
+            # Interval component for animation
+            dcc.Interval(id='removal-sim-interval', interval=500, disabled=True)
         ]), className="mt-3"
     )

@@ -2,7 +2,7 @@ from dash import Input, Output, State, no_update, clientside_callback, MATCH
 import numpy as np
 
 from core.models.lenses import LensPairSimulationData
-from core.geometric.lens_volume import generate_lens_volume
+from core.geometric.lens_volume import generate_lens_volume, generate_machined_lens_volume
 
 def register_removal_simulation_callbacks(app):
     """
@@ -40,7 +40,7 @@ def register_removal_simulation_callbacks(app):
         function(n_intervals, current_val, max_val) {
             if (!max_val) return current_val;
             // Advance by 0.1 seconds per interval (assuming 10Hz interval)
-            let new_val = current_val + 0.1;
+            let new_val = current_val + 0.5;
             if (new_val > max_val) {
                 return 0;
             }
@@ -57,11 +57,12 @@ def register_removal_simulation_callbacks(app):
     # --- 2. GENERATE LENS VOLUME DATA ---
     @app.callback(
         Output('store-lens-volume', 'data'),
-        Input('store-mesh-cache', 'data'),
+        State('store-mesh-cache', 'data'),
+        Input('store-simulation-path', 'data'),
         State('view-eye-select', 'value'),
         prevent_initial_call=True
     )
-    def generate_lens_volume_data(mesh_cache, side="L"):
+    def generate_lens_volume_data(mesh_cache, simulation_path, side="L"):
         """Generate volumetric representation of the lens blank."""
         if not mesh_cache:
             return no_update
@@ -74,12 +75,13 @@ def register_removal_simulation_callbacks(app):
             return no_update
         
         # Generate volume using lens blank parameters
-        volume_data = generate_lens_volume(
+        volume_data = generate_machined_lens_volume(
             front_radius=lens.blank_front_radius,
             back_radius=lens.blank_back_radius,
             center_thickness=lens.blank_center_thickness,
             diameter_mm=lens.blank_diameter,
-            resolution=0.2
+            tool_path=simulation_path,
+            resolution=0.3
         )
         
         # Return serialized data
@@ -111,3 +113,27 @@ def register_removal_simulation_callbacks(app):
         Input('store-lens-volume', 'data'),
         prevent_initial_call=True
     )
+
+    # --- 4. UPDATE CONTOUR VALUE ON SLIDER CHANGE ---
+    clientside_callback(
+        """
+        function(slider_value, slider_max) {
+            if (slider_value === null || slider_value === undefined) {
+                return window.dash_clientside.no_update;
+            }
+            
+            if (window.vtkManager && window.vtkManager.isInitialized) {
+                window.vtkManager.setContourValue(slider_value, slider_max);
+            }
+
+            console.log("Updated contour to: " + (1000 - slider_max + slider_value));
+            
+            return "Contour: " + (1000 - slider_max + slider_value);
+        }
+        """,
+        Output('dummy-status-removal', 'children', allow_duplicate=True),
+        Input('removal-sim-slider', 'value'),
+        State('removal-sim-slider', 'max'),
+        prevent_initial_call=True
+    )
+    
