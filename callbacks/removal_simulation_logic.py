@@ -1,9 +1,10 @@
-from dash import Input, Output, State, no_update, clientside_callback, MATCH
+from dash import Input, Output, State, no_update, clientside_callback, MATCH, dcc
 import numpy as np
 
 from core.models.lenses import LensPairSimulationData
 from core.geometric.lens_volume import generate_lens_volume, generate_machined_lens_volume
 from core.machine_config import load_machine_config_cached, load_tool_mesh_cached
+from core.exporters.path_exporter import format_path_data_to_csv, get_export_filename, get_path_summary
 
 def register_removal_simulation_callbacks(app):
     """
@@ -339,3 +340,36 @@ def register_removal_simulation_callbacks(app):
         prevent_initial_call=True
     )
     
+    # --- DOWNLOAD TOOLPATH DATA ---
+    @app.callback(
+        Output('download-toolpath', 'data'),
+        Input('btn-download-toolpath', 'n_clicks'),
+        State('store-simulation-path', 'data'),
+        State('store-path-time', 'data'),
+        prevent_initial_call=True
+    )
+    def download_toolpath(n_clicks, path_data, time_data):
+        """Export tool path and timing data to CSV file."""
+        if not n_clicks or not path_data or not time_data:
+            return no_update
+        
+        # Format data to CSV
+        csv_content = format_path_data_to_csv(path_data, time_data)
+        
+        if not csv_content:
+            return no_update
+        
+        # Get filename with timestamp
+        filename = get_export_filename('csv')
+        
+        # Return download data
+        return dict(content=csv_content, filename=filename)
+    
+    @app.callback(
+        Output('btn-download-toolpath', 'disabled'),
+        Input('store-simulation-path', 'data'),
+        prevent_initial_call=True
+    )
+    def enable_download_button(path_data):
+        """Enable download button after path is generated."""
+        return not bool(path_data and path_data.get('x'))
