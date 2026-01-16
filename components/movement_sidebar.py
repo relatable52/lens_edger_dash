@@ -43,9 +43,10 @@ roughing_settings = html.Div(
                 {'name': 'Pass', 'id': 'pass_index', 'type': 'numeric', 'editable': False, 'presentation': 'markdown'},
                 {'name': 'Step (mm)', 'id': 'step', 'type': 'numeric', 'editable': True},
                 {'name': 'Speed (s/rev)', 'id': 'speed', 'type': 'numeric', 'editable': True},
+                {'name': 'Vol (mm³/s)', 'id': 'max_vol', 'type': 'numeric', 'editable': True},
             ],
             data=[
-                {'pass_index': 1, 'step': 3.0, 'speed': 15}
+                {'pass_index': 1, 'step': 3.0, 'speed': 15, 'max_vol': 100.0}
             ],
             row_deletable=True,
             row_selectable=False,

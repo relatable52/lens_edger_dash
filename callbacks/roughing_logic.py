@@ -61,13 +61,15 @@ def register_roughing_callbacks(app):
                 new_row = {
                     'pass_index': new_pass_index,
                     'step': last_pass.get('step', 3.0),
-                    'speed': last_pass.get('speed', 15)
+                    'speed': last_pass.get('speed', 15),
+                    'max_vol': last_pass.get('max_vol', 100.0)
                 }
             else:
                 new_row = {
                     'pass_index': new_pass_index,
                     'step': 3.0,
-                    'speed': 15
+                    'speed': 15,
+                    'max_vol': 100.0
                 }
             
             new_table_data = table_data + [new_row] if table_data else [new_row]
@@ -76,7 +78,8 @@ def register_roughing_callbacks(app):
             roughing_settings.passes = [
                 RoughingPassParam(
                     step_value_mm=float(row.get('step', 3.0)),
-                    speed_s_per_rev=float(row.get('speed', 15))
+                    speed_s_per_rev=float(row.get('speed', 15)),
+                    max_volume_mm3_per_sec=float(row.get('max_vol', 100.0))
                 )
                 for row in new_table_data
             ]
@@ -93,7 +96,8 @@ def register_roughing_callbacks(app):
             roughing_settings.passes = [
                 RoughingPassParam(
                     step_value_mm=float(row.get('step', 3.0)),
-                    speed_s_per_rev=float(row.get('speed', 15))
+                    speed_s_per_rev=float(row.get('speed', 15)),
+                    max_volume_mm3_per_sec=float(row.get('max_vol', 100.0))
                 )
                 for row in table_data
             ]
@@ -104,7 +108,8 @@ def register_roughing_callbacks(app):
             roughing_settings.passes = [
                 RoughingPassParam(
                     step_value_mm=float(row.get('step', 3.0)),
-                    speed_s_per_rev=float(row.get('speed', 15))
+                    speed_s_per_rev=float(row.get('speed', 15)),
+                    max_volume_mm3_per_sec=float(row.get('max_vol', 100.0))
                 )
                 for row in table_data
             ]
@@ -185,9 +190,10 @@ def register_roughing_callbacks(app):
                     'mesh': r.mesh.to_dict(),
                     'radii': r.radii,
                     'volume': r.volume,
-                    'duration': r.duration
+                    'duration': r.duration,
+                    'max_vol': table_data[i].get('max_vol', None) if i < len(table_data) else None
                 }
-                for r in roughing_results
+                for i, r in enumerate(roughing_results)
             ]
             
             return no_update, results_dict
@@ -243,7 +249,8 @@ def register_roughing_callbacks(app):
         return [
             RoughingPassParam(
                 step_value_mm=float(pass_info.get('step_value_mm', 3.0)),
-                speed_s_per_rev=float(pass_info.get('speed_s_per_rev', 15))
+                speed_s_per_rev=float(pass_info.get('speed_s_per_rev', 15)),
+                max_volume_mm3_per_sec=float(pass_info.get('max_volume_mm3_per_sec', 100.0))
             )
             for pass_info in roughing_store['passes']
         ]

@@ -23,6 +23,7 @@ def register_simulation_callbacks(app):
     # Trigger: "Generate Paths" button
     @app.callback(
         Output('store-simulation-path', 'data'),
+        Output('store-path-time', 'data'),
         Input('btn-gen-path', 'n_clicks'),
         State('store-mesh-cache', 'data'),
         State('store-roughing-results', 'data'),
@@ -67,36 +68,53 @@ def register_simulation_callbacks(app):
         x, z, theta, time = complete_path.get_full_path()
         
         if len(x) == 0:
-            return no_update
+            return no_update, no_update
 
-        # 5. Build pass timing metadata from complete path
-        # Track cumulative time at the end of each pass for accurate active pass detection
-        pass_time_breaks = []
-        cumulative_time = 0.0
+        # 5. Build pass segment metadata from complete path (index-based, time-independent)
+        # Track frame indices for each pass to enable time-independent segmentation
+        pass_segments = []
+        frame_offset = 0
         
         for step in complete_path.steps:
             if step.time is not None and len(step.time) > 0:
-                step_duration = step.time[-1]  # Duration of this step
-                cumulative_time += step_duration
+                num_frames = len(step.x) if hasattr(step, 'x') else len(step.time)
                 
-                # Record breakpoint if this is a roughing or beveling step
+                # Record segment if this is a roughing or beveling step
                 if step.operation_type in ['roughing', 'beveling']:
-                    pass_time_breaks.append({
-                        'start_time': float(cumulative_time - step_duration),
-                        'end_time': float(cumulative_time),
+                    pass_segments.append({
+                        'start_idx': int(frame_offset),
+                        'end_idx': int(frame_offset + num_frames - 1),
                         'pass_index': int(step.pass_index),
-                        'operation_type': step.operation_type
+                        'operation_type': step.operation_type,
+                        'max_volume_rate': None  # Will be populated later from roughing_results
                     })
+                
+                frame_offset += num_frames
 
-        # 6. Serialize for Store (Numpy -> List)
-        return {
+        # 6. Add max_vol constraints from roughing_results to pass_segments
+        if roughing_results:
+            roughing_idx = 0
+            for segment in pass_segments:
+                if segment['operation_type'] == 'roughing' and roughing_idx < len(roughing_results):
+                    segment['max_volume_rate'] = roughing_results[roughing_idx].get('max_vol', None)
+                    roughing_idx += 1
+
+        # 7. Serialize for Stores (Numpy -> List)
+        # Path data (spatial, time-independent)
+        path_data = {
             "x": x.tolist(),
             "z": z.tolist(),
             "theta": theta.tolist(),
-            "time": time.tolist(),
             "total_frames": len(x),
-            "pass_time_breaks": pass_time_breaks
+            "pass_segments": pass_segments
         }
+        
+        # Time data (separate store for independent adjustment)
+        time_data = {
+            "time": time.tolist()
+        }
+        
+        return path_data, time_data
 
     # --- 2. ANIMATION CONTROLS ---
     @app.callback(
@@ -110,18 +128,18 @@ def register_simulation_callbacks(app):
 
     @app.callback(
         Output('sim-slider', 'max'),
-        Input('store-simulation-path', 'data'),
+        Input('store-path-time', 'data'),
         prevent_initial_call=True
     )
-    def update_slider_max(path_data):
+    def update_slider_max(time_data):
         """Set slider max to duration of operation in seconds."""
-        if not path_data or 'time' not in path_data:
+        if not time_data or 'time' not in time_data:
             return 100
         
-        time_data = path_data['time']
-        if time_data and len(time_data) > 0:
+        time_array = time_data['time']
+        if time_array and len(time_array) > 0:
             # Round up to nearest second
-            return int(np.ceil(time_data[-1]))
+            return int(np.ceil(time_array[-1]))
         return 100
 
     # --- 2B. ADVANCE SLIDER (Clientside) ---
@@ -181,17 +199,18 @@ def register_simulation_callbacks(app):
     # --- 3B. ANIMATE SCENE + UPDATE MESH VISIBILITY ---
     clientside_callback(
         """
-        function(slider_time, path_data) {
+        function(slider_time, path_data, time_data) {
             // 1. Safety Checks
-            if (!path_data || !path_data.x) {
+            if (!path_data || !path_data.x || !time_data || !time_data.time) {
                 return window.dash_clientside.no_update;
             }
 
             // 2. Find frame index based on time
             let frame_idx = 0;
-            if (path_data.time && path_data.time.length > 0) {
-                for (let i = 0; i < path_data.time.length; i++) {
-                    if (path_data.time[i] <= slider_time) {
+            const time_array = time_data.time;
+            if (time_array && time_array.length > 0) {
+                for (let i = 0; i < time_array.length; i++) {
+                    if (time_array[i] <= slider_time) {
                         frame_idx = i;
                     } else {
                         break;
@@ -220,22 +239,24 @@ def register_simulation_callbacks(app):
         Output('sim-lens-cut-rep', 'actor'),
         Input('sim-slider', 'value'),
         State('store-simulation-path', 'data'),
+        State('store-path-time', 'data'),
         prevent_initial_call=True
     )
 
     clientside_callback(
         """
-        function(slider_time, path_data, id_dict) {
+        function(slider_time, path_data, time_data, id_dict) {
             // 1. Safety Checks
-            if (!path_data || !path_data.x) {
+            if (!path_data || !path_data.x || !time_data || !time_data.time) {
                 return window.dash_clientside.no_update;
             }
 
             // 2. Find frame index based on time
             let frame_idx = 0;
-            if (path_data.time && path_data.time.length > 0) {
-                for (let i = 0; i < path_data.time.length; i++) {
-                    if (path_data.time[i] <= slider_time) {
+            const time_array = time_data.time;
+            if (time_array && time_array.length > 0) {
+                for (let i = 0; i < time_array.length; i++) {
+                    if (time_array[i] <= slider_time) {
                         frame_idx = i;
                     } else {
                         break;
@@ -263,6 +284,7 @@ def register_simulation_callbacks(app):
         Output({'type': 'sim-lens-roughing-rep', 'index': MATCH}, 'actor'),
         Input('sim-slider', 'value'),
         State('store-simulation-path', 'data'),
+        State('store-path-time', 'data'),
         State({'type': 'sim-lens-roughing-rep', 'index': MATCH}, 'id'),
         prevent_initial_call=True
     )
@@ -270,36 +292,48 @@ def register_simulation_callbacks(app):
     # --- 3C. DETERMINE ACTIVE PASS INDEX (Clientside) ---
     clientside_callback(
         """
-        function(slider_time, path_data) {
-            if (!path_data || !path_data.time) {
+        function(slider_time, path_data, time_data) {
+            if (!path_data || !time_data || !time_data.time) {
                 return {pass_index: 0, is_beveling: true};
             }
 
-            // Use actual timing metadata from path_data
-            if (!path_data.pass_time_breaks || path_data.pass_time_breaks.length === 0) {
-                // Fallback to old behavior if metadata not available
-                const total_time = path_data.time[path_data.time.length - 1];
+            const time_array = time_data.time;
+            
+            // Convert index-based segments to time-based breaks on the fly
+            if (!path_data.pass_segments || path_data.pass_segments.length === 0) {
                 return {pass_index: 0, is_beveling: true};
             }
 
-            // Find which pass the slider_time falls into using cumulative timing
+            // Find current frame index from slider time
+            let frame_idx = 0;
+            if (time_array && time_array.length > 0) {
+                for (let i = 0; i < time_array.length; i++) {
+                    if (time_array[i] <= slider_time) {
+                        frame_idx = i;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            
+            // Find which segment this frame belongs to
             let current_pass = 0;
             let is_beveling = true;
             
-            for (let i = 0; i < path_data.pass_time_breaks.length; i++) {
-                const breakpoint = path_data.pass_time_breaks[i];
-                if (slider_time < breakpoint.end_time) {
-                    current_pass = breakpoint.pass_index;
-                    is_beveling = breakpoint.operation_type === 'beveling';
+            for (let i = 0; i < path_data.pass_segments.length; i++) {
+                const segment = path_data.pass_segments[i];
+                if (frame_idx >= segment.start_idx && frame_idx <= segment.end_idx) {
+                    current_pass = segment.pass_index;
+                    is_beveling = segment.operation_type === 'beveling';
                     break;
                 }
             }
             
-            // If we've exceeded all breakpoints, we're at the last operation
-            if (slider_time >= path_data.pass_time_breaks[path_data.pass_time_breaks.length - 1].end_time) {
-                const last_break = path_data.pass_time_breaks[path_data.pass_time_breaks.length - 1];
-                current_pass = last_break.pass_index;
-                is_beveling = last_break.operation_type === 'beveling';
+            // If we're past all segments, use the last one
+            if (frame_idx > path_data.pass_segments[path_data.pass_segments.length - 1].end_idx) {
+                const last_segment = path_data.pass_segments[path_data.pass_segments.length - 1];
+                current_pass = last_segment.pass_index;
+                is_beveling = last_segment.operation_type === 'beveling';
             }
             
             return {pass_index: current_pass, is_beveling: is_beveling};
@@ -307,7 +341,8 @@ def register_simulation_callbacks(app):
         """,
         Output('store-active-pass', 'data'),
         Input('sim-slider', 'value'),
-        State('store-simulation-path', 'data')
+        State('store-simulation-path', 'data'),
+        State('store-path-time', 'data')
     )
 
     # --- 3D. UPDATE ROUGHING MESH OPACITY FROM STORE (Clientside Pattern-Matching) ---
@@ -346,31 +381,25 @@ def register_simulation_callbacks(app):
         """,
         Output({'type': 'sim-lens-roughing-rep', 'index': MATCH}, 'property'),
         Input('store-active-pass', 'data'),
-        State({'type': 'sim-lens-roughing-rep', 'index': MATCH}, 'id')
+        State({'type': 'sim-lens-roughing-rep', 'index': MATCH}, 'id'),
+        prevent_initial_call=True
     )
 
     # --- 3D. UPDATE FINAL LENS OPACITY DURING ANIMATION ---
     clientside_callback(
         """
-        function(slider_time, path_data, roughing_results) {
-            if (!path_data || !roughing_results || !path_data.time) {
+        function(active_pass_data) {
+            if (!active_pass_data) {
                 return window.dash_clientside.no_update;
             }
-
-            // Estimate operation timing
-            const total_time = path_data.time[path_data.time.length - 1];
-            const num_passes = roughing_results.length;
-            const time_per_pass = total_time / (num_passes + 1);
             
-            // Show final lens only in beveling (after all roughing passes)
-            const is_beveling = slider_time > (time_per_pass * num_passes);
+            // Show final lens only during beveling operation
+            const is_beveling = active_pass_data.is_beveling;
             
             return {opacity: is_beveling ? 1.0 : 0.0};
         }
         """,
         Output('sim-lens-cut-rep', 'property'),
-        Input('sim-slider', 'value'),
-        State('store-simulation-path', 'data'),
-        State('store-roughing-results', 'data'),
+        Input('store-active-pass', 'data'),
         prevent_initial_call=True
     )

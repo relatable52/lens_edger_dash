@@ -1,3 +1,5 @@
+# DEPRECATED
+
 import numpy as np
 
 def generate_full_simulation_path(kinematics, wheel_x, wheel_z, home_x=150.0, home_z=0.0, approach_steps=30):

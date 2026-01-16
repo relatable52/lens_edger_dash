@@ -119,17 +119,18 @@ def generate_lens_volume(
                 max_dist = np.max([dist_cyl, dist_sphere1, dist_sphere2])
                 
                 # --- Map Distance to Density with Smooth Transitions ---
-                # Values: 1000 = full material, 0 = air, 500 = isosurface
+                # Values: 1000 = full material (never cut), 0 = air (frame 0)
+                # Frame-based encoding for unified contour control
                 
                 if max_dist < -smooth_edge:
-                    # Safely inside lens material
+                    # Safely inside lens material (will be machined)
                     value = 1000.0
                 elif max_dist > smooth_edge:
-                    # Safely outside lens (air)
-                    value = 1000.0 - time_length
+                    # Safely outside lens (air - never visible)
+                    value = 0.0
                 else:
                     # Smooth transition zone
-                    value = 1000.0 - time_length * (max_dist + smooth_edge) / (2 * smooth_edge)
+                    value = 1000.0 * (1.0 - (max_dist + smooth_edge) / (2 * smooth_edge))
                 
                 data_array[iter_idx] = value
                 iter_idx += 1
@@ -159,7 +160,7 @@ def compute_voxel_death_times(voxels, voxel_res, tool_path, tool_stack: ToolStac
     
     # 1. Initialize Death Time Array
     death_times = voxels
-    time_length = tool_path['time'][-1]
+    num_steps = len(tool_path['time'])
     
     # 2. Pre-calculate Profile Interpolators for each wheel
     #    Maps 'Y' (height along tool) to 'Z' (radial offset from cutting edge)
@@ -238,14 +239,15 @@ def compute_voxel_death_times(voxels, voxel_res, tool_path, tool_stack: ToolStac
 
         # print("Hehe", r_mach, z_mach)
         
-        # Determine active wheel based on time or pass_data
-        # Simple logic: check which pass 't' falls into
+        # Determine active wheel based on frame index and pass_segments
+        # Use index-based segmentation instead of time-based
         active_wheel = None
-        for p_data in tool_path['pass_time_breaks']:
-            if p_data['start_time'] <= t <= p_data['end_time']:
-                # Find the wheel object from the stack
-                active_wheel = tool_stack.wheels[0] if p_data['operation_type'] == 'roughing' else tool_stack.wheels[1]
-                break
+        if 'pass_segments' in tool_path:
+            for segment in tool_path['pass_segments']:
+                if segment['start_idx'] <= i <= segment['end_idx']:
+                    # Find the wheel object from the stack
+                    active_wheel = tool_stack.wheels[0] if segment['operation_type'] == 'roughing' else tool_stack.wheels[1]
+                    break
         
         if not active_wheel: continue
         if active_wheel.tool_id not in profile_funcs: continue
@@ -312,7 +314,7 @@ def compute_voxel_death_times(voxels, voxel_res, tool_path, tool_stack: ToolStac
         # Get allowed radius at this height from profile
         # This returns the Z-offset from the profile (e.g., -1.5)
         prof_z_offsets = profile_funcs[active_wheel.tool_id](eff_h)
-        # print(eff_h[12], prof_z_offsets[12])
+        print(eff_h[12], prof_z_offsets[12])
         
         # Calculate the actual physical radius of the tool surface at this height
         # Surface_Radius = Cutting_Radius + Profile_Z_Offset
@@ -324,7 +326,8 @@ def compute_voxel_death_times(voxels, voxel_res, tool_path, tool_stack: ToolStac
         # Use a mask to update only valid cuts
         cut_mask = d_vals - tool_surface_radii
         cut_mask = np.clip(cut_mask, a_min=-0.1, a_max=0.1)
-        cut_mask = (1 - cut_mask/0.1)/2*(time_length - t + 0.5)
+        # Use frame index instead of time for scalar encoding
+        cut_mask = (1 - cut_mask/0.1)/2*(num_steps - i + 0.5)
 
         # print((cut_mask > 400).sum())
         
@@ -335,13 +338,177 @@ def compute_voxel_death_times(voxels, voxel_res, tool_path, tool_stack: ToolStac
         # We use minimum: if it was already cut at t=5, and now t=10, keep 5.
         # But we only update where cut_mask is True.
         
-        # Create a temporary array for this step's time
+        # Create a temporary array for this step's frame-based scalar
+        # Normalize frame indices to 0-1000 range
         current_step_times = np.full(voxels.shape, 1000, dtype=np.float32)
-        current_step_times = current_step_times - cut_mask_3d
+        current_step_times = current_step_times - (cut_mask_3d / num_steps) * 1000
         
         death_times = np.minimum(death_times, current_step_times)
 
     return death_times
+
+def compute_volume_history(
+    death_times: np.ndarray,
+    time_array: np.ndarray,
+    voxel_volume_mm3: float
+) -> dict:
+    """
+    Calculate volume remaining and removed at each time step based on voxel death times.
+    
+    Args:
+        death_times: 3D array where each voxel contains the time it was cut (or np.inf if uncut)
+        time_array: Array of time values to evaluate volume at
+        voxel_volume_mm3: Volume of a single voxel in mm³ (resolution³)
+    
+    Returns:
+        dict with keys:
+            - 'time': Array of time values (same as input)
+            - 'volume_remaining': Array of remaining volume in mm³ at each time
+            - 'volume_removed': Array of removed volume in mm³ at each time
+            - 'percentage_complete': Array of completion percentage at each time
+    """
+    # Calculate initial total volume (count all voxels that will eventually be cut)
+    # Voxels with death_times < inf are part of the workpiece
+    workpiece_voxels = np.sum(death_times < 1000)
+    initial_volume = workpiece_voxels * voxel_volume_mm3
+    
+    # For each time step, count voxels still alive (death_times > t)
+    volume_remaining = np.zeros(len(time_array))
+    volume_removed = np.zeros(len(time_array))
+    percentage_complete = np.zeros(len(time_array))
+    
+    for i, t in enumerate(time_array):
+        # Count voxels that are still alive at time t
+        remaining_voxels = np.sum(death_times > t)
+        volume_remaining[i] = remaining_voxels * voxel_volume_mm3
+        volume_removed[i] = initial_volume - volume_remaining[i]
+        
+        if initial_volume > 0:
+            percentage_complete[i] = (volume_removed[i] / initial_volume) * 100.0
+    
+    return {
+        'time': time_array,
+        'volume_remaining': volume_remaining,
+        'volume_removed': volume_removed,
+        'percentage_complete': percentage_complete
+    }
+
+
+def calculate_volume_removal_rates(
+    death_times: np.ndarray,
+    time_array: np.ndarray,
+    voxel_volume_mm3: float,
+    pass_segments: list
+) -> dict:
+    """
+    Calculate volume removal rate at each frame based on voxel death times.
+    
+    Args:
+        death_times: 3D array where each voxel contains the frame it was cut (0-1000)
+        time_array: Array of time values for each frame
+        voxel_volume_mm3: Volume of a single voxel in mm³
+        pass_segments: List of pass segment metadata with max_volume_rate constraints
+    
+    Returns:
+        dict with keys:
+            - 'frame_indices': Frame index for each measurement
+            - 'volume_removed_per_frame': Volume removed at each frame (mm³)
+            - 'max_allowed_rate': Maximum allowed rate at each frame (mm³/s)
+    """
+    num_frames = len(time_array)
+    
+    # Convert death times (frame-based 0-1000) back to frame indices
+    death_frame_indices = (death_times / 1000 * num_frames)
+    
+    # Exclude voxels that were never cut (death_times >= 1000)
+    # These are blank material outside the machining zone
+    cut_mask = death_frame_indices < num_frames
+    death_frame_indices_cut = death_frame_indices[cut_mask]
+    
+    # Count voxels cut at each frame using histogram
+    bin_edges = np.arange(num_frames + 1)  # [0, 1, 2, ..., num_frames]
+    voxel_counts, _ = np.histogram(death_frame_indices_cut.flatten(), bins=bin_edges)
+    volume_per_frame = voxel_counts * voxel_volume_mm3
+    
+    # Determine max allowed rate for each frame based on pass_segments
+    max_allowed_rate = np.full(num_frames, 100.0)  # Default 100 mm³/s
+    
+    for segment in pass_segments:
+        start_idx = segment.get('start_idx', 0)
+        end_idx = segment.get('end_idx', num_frames - 1)
+        max_vol = segment.get('max_volume_rate')
+        
+        if max_vol is not None and max_vol > 0:
+            max_allowed_rate[start_idx:end_idx+1] = max_vol
+    
+    # Fill gaps: if frame not in any segment, use previous segment's value
+    # Already handled by default value of 100.0 and explicit segment assignment
+    # But we need to forward-fill for frames between segments
+    last_valid_rate = 100.0
+    for i in range(num_frames):
+        # Check if this frame is in any segment
+        in_segment = False
+        for segment in pass_segments:
+            if segment.get('start_idx', 0) <= i <= segment.get('end_idx', num_frames - 1):
+                in_segment = True
+                last_valid_rate = max_allowed_rate[i]
+                break
+        
+        if not in_segment:
+            max_allowed_rate[i] = last_valid_rate
+    
+    return {
+        'frame_indices': np.arange(num_frames),
+        'volume_removed_per_frame': volume_per_frame,
+        'max_allowed_rate': max_allowed_rate
+    }
+
+
+def adjust_time_array_for_volume_constraints(
+    time_array: np.ndarray,
+    volume_per_frame: np.ndarray,
+    max_allowed_rate: np.ndarray
+) -> np.ndarray:
+    """
+    Adjust time array to ensure volume removal rate doesn't exceed constraints.
+    
+    Args:
+        time_array: Original time values for each frame
+        volume_per_frame: Volume removed at each frame (mm³)
+        max_allowed_rate: Maximum allowed rate at each frame (mm³/s)
+    
+    Returns:
+        Adjusted time array that respects volume rate constraints
+    """
+    num_frames = len(time_array)
+    adjusted_time = np.zeros(num_frames)
+    
+    for i in range(num_frames):
+        if i == 0:
+            adjusted_time[i] = 0.0
+            continue
+        
+        # Calculate time delta from previous frame
+        original_dt = time_array[i] - time_array[i-1]
+        
+        # Calculate actual removal rate if we use original timing
+        if original_dt > 0:
+            actual_rate = volume_per_frame[i] / original_dt
+        else:
+            actual_rate = 0.0
+        
+        # If actual rate exceeds max, slow down
+        max_rate = max_allowed_rate[i]
+        if actual_rate > max_rate and max_rate > 0:
+            # Required time to stay within constraint
+            required_dt = volume_per_frame[i] / max_rate
+            adjusted_time[i] = adjusted_time[i-1] + required_dt
+        else:
+            # Use original timing
+            adjusted_time[i] = adjusted_time[i-1] + original_dt
+    
+    return adjusted_time
+
 
 def generate_machined_lens_volume(
     front_radius,
