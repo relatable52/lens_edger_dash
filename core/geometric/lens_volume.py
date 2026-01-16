@@ -314,7 +314,7 @@ def compute_voxel_death_times(voxels, voxel_res, tool_path, tool_stack: ToolStac
         # Get allowed radius at this height from profile
         # This returns the Z-offset from the profile (e.g., -1.5)
         prof_z_offsets = profile_funcs[active_wheel.tool_id](eff_h)
-        print(eff_h[12], prof_z_offsets[12])
+        # print(eff_h[12], prof_z_offsets[12])
         
         # Calculate the actual physical radius of the tool surface at this height
         # Surface_Radius = Cutting_Radius + Profile_Z_Offset
