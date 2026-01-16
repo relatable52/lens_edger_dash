@@ -14,6 +14,7 @@ class RoughingPassParam:
     """
     step_value_mm: float    # Distance to move in from the PREVIOUS cut
     speed_s_per_rev: float  # Processing speed
+    max_volume_mm3_per_sec: float = 100.0  # Maximum volume removal rate (mm³/s)
 
 @dataclass
 class RoughingSettings:
@@ -30,7 +31,8 @@ class RoughingSettings:
             "passes": [
                 {
                     "step_value_mm": p.step_value_mm,
-                    "speed_s_per_rev": p.speed_s_per_rev
+                    "speed_s_per_rev": p.speed_s_per_rev,
+                    "max_volume_mm3_per_sec": p.max_volume_mm3_per_sec
                 }
                 for p in self.passes
             ]
@@ -44,7 +46,8 @@ class RoughingSettings:
         passes = [
             RoughingPassParam(
                 step_value_mm=float(p.get('step_value_mm', 3.0)),
-                speed_s_per_rev=float(p.get('speed_s_per_rev', 15))
+                speed_s_per_rev=float(p.get('speed_s_per_rev', 15)),
+                max_volume_mm3_per_sec=float(p.get('max_volume_mm3_per_sec', 100.0))
             )
             for p in data.get('passes', [])
         ]

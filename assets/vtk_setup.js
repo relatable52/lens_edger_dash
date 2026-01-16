@@ -110,11 +110,11 @@ window.vtkManager = {
         renderWindow.render();
     },
 
-    setContourValue: function(value, time_length) {
+    setContourValue: function(value) {
         if (!this.isInitialized) return;
         const { marchingCube, renderWindow } = this.components;
         
-        marchingCube.setContourValue(1000 - time_length + value);
+        marchingCube.setContourValue(value);
         renderWindow.render();
     },
 

@@ -80,7 +80,8 @@ app.layout = dbc.Container([
     dcc.Store(id='store-lenses-data'), # Hidden store for lenses data
     dcc.Store(id='store-mesh-cache'), # Hidden store for calculated mesh data
     dcc.Store(id='store-bevel-settings'), # Hidden store for bevel settings
-    dcc.Store(id='store-simulation-path'), # Hidden store for full simulation path
+    dcc.Store(id='store-simulation-path'), # Hidden store for spatial path data (x, z, theta)
+    dcc.Store(id='store-path-time'), # Hidden store for time array (separate for independent adjustment)
     dcc.Store(id='store-eye-select', data='L'), # Hidden store for eye selection
     dcc.Store(id='store-active-pass', data={'pass_index': 0, 'is_beveling': False}), # Active mesh pass for animation
     dcc.Interval(id='sim-interval', disabled=True, interval=100), # Interval for simulation updates
@@ -121,7 +122,7 @@ DEV_ENV = True if os.getenv("DEV_ENV", "False") == "True" else False
 if __name__ == "__main__":
     # Get the PORT from the environment (default to 8050 if not set)
     port = int(os.environ.get("PORT", 8050))
-    debug = os.environ.get("DEV_ENV", False)
+    debug = True if os.environ.get("DEV_ENV", "False") == "True" else False
     
     # Host must be 0.0.0.0 to be accessible externally
     app.run(host="0.0.0.0", port=port, debug=debug)

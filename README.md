@@ -1,19 +1,19 @@
 # How to run from source
 
-You need to have Python on your machine.
+This instruction if for running on Windows.
 
-First install `uv`.
+First install `uv`. 
 
-From the root project folder run
+Open the terminal from the root of the project folder and type
 
 ```
-pip install uv
+winget install --id=astral-sh.uv  -e
 ```
 
 Then run 
 
 ```
-uv run main.py
+uv sync && uv run main.py
 ```
 
 You should see this printed on the terminal
@@ -30,4 +30,4 @@ WARNING: This is a development server. Do not use it in a production deployment.
 Press CTRL+C to quit
 ```
 
-Visit [http://127.0.0.1:8050](http://127.0.0.1:8050) to see the application.
+Open web browser and visit [http://127.0.0.1:8050](http://127.0.0.1:8050) to see the application.

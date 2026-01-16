@@ -89,7 +89,8 @@ def _generate_linear_path(
     distance_mm: float,
     speed_mm_per_sec: float = 50.0,
     feed_rate_s_per_rev: float = 10.0,
-    operation_type: str = 'approach'
+    operation_type: str = 'approach',
+    pass_index: int = 0
 ) -> OperationStep:
     """
     Generate linear interpolation path between two points.
@@ -112,7 +113,7 @@ def _generate_linear_path(
     # Use euclidean distance in XZ plane
     if distance_mm > 0:
         duration = distance_mm / speed_mm_per_sec
-        n_frames = max(int(duration * 30), 2)  # 30 Hz assumed playback
+        n_frames = max(int(duration * 10), 10)  # At least 10 frames
     else:
         n_frames = 10
     
@@ -126,6 +127,7 @@ def _generate_linear_path(
     
     return OperationStep(
         operation_type=operation_type,
+        pass_index=pass_index,
         x=x,
         z=z,
         theta=theta,
@@ -268,23 +270,44 @@ def generate_full_roughing_path(
         if not kinematics or len(kinematics['x_machine']) == 0:
             continue
         
+        if pass_index == 0: # First pass, need to APPROACH from home
+            # RETRACT to safe distance first
+            retract_x = wheel_x - kinematics['x_machine'][0] - 40.0
+            retract_z = wheel_z + kinematics['z_machine'][0]
+            retract_theta = kinematics['theta_machine_deg'][0]
+            retract_dist = 40
+
+            steps.append(_generate_linear_path(
+                start=(current_x, current_z, current_theta),
+                end=(retract_x, retract_z, retract_theta),
+                distance_mm=retract_dist,
+                speed_mm_per_sec=xyz_feedrate,
+                feed_rate_s_per_rev=speed,
+                operation_type='approach'
+            ))
+
+            current_x = retract_x
+            current_z = retract_z
+            current_theta = retract_theta
+
         # Get start position of this cut
         start_x = wheel_x - kinematics['x_machine'][0]
         start_z = wheel_z + kinematics['z_machine'][0]
-        start_theta = kinematics['theta_machine_deg'][0]
+        start_theta = kinematics['theta_machine_deg'][0] + 360.0*pass_index  # Offset theta for continuous rotation
         
         # APPROACH to start position
         approach_dist = np.sqrt(
             (start_x - current_x)**2 + (start_z - current_z)**2
         )
-        
+
         steps.append(_generate_linear_path(
             start=(current_x, current_z, current_theta),
             end=(start_x, start_z, start_theta),
             distance_mm=approach_dist,
-            speed_mm_per_sec=xyz_feedrate,
+            speed_mm_per_sec=10,
             feed_rate_s_per_rev=speed,
-            operation_type='approach'
+            operation_type='roughing',
+            pass_index=pass_index + 1
         ))
         
         # CUTTING PASS
@@ -301,14 +324,33 @@ def generate_full_roughing_path(
         # Update current position
         current_x = wheel_x - kinematics['x_machine'][-1]
         current_z = wheel_z + kinematics['z_machine'][-1]
-        current_theta = kinematics['theta_machine_deg'][-1]
+        current_theta = kinematics['theta_machine_deg'][-1] + 360.0*pass_index
     
     # 3. RETRACT TO HOME
-    retract_dist = np.sqrt((home_x - current_x)**2 + (home_z - current_z)**2)
+    # Retract to safe distance first
+    retract_x = current_x - 40.0
+    retract_z = current_z
+    retract_theta = current_theta
+
+    retract_dist = 40
+
     steps.append(_generate_linear_path(
         start=(current_x, current_z, current_theta),
-        end=(home_x, home_z, 0.0),
+        end=(retract_x, retract_z, retract_theta),
         distance_mm=retract_dist,
+        speed_mm_per_sec=xyz_feedrate,
+        feed_rate_s_per_rev=speed,
+        operation_type='retract'
+    ))
+
+    # Finally retract to home
+    final_retract_dist = np.sqrt(
+        (home_x - retract_x)**2 + (home_z - retract_z)**2
+    )
+    steps.append(_generate_linear_path(
+        start=(retract_x, retract_z, retract_theta),
+        end=(home_x, home_z, 360.0 * len(roughing_passes)),
+        distance_mm=final_retract_dist,
         speed_mm_per_sec=xyz_feedrate,
         operation_type='retract'
     ))
@@ -326,7 +368,8 @@ def generate_full_beveling_path(
     speed_s_per_rev: float = 10.0,
     home_x: float = -50.0,
     home_z: float = 0.0,
-    xyz_feedrate: float = 50.0
+    xyz_feedrate: float = 50.0,
+    base_theta_offset: float = 0.0
 ) -> MovementPath:
     """
     Generate beveling path for the final contour.
@@ -344,7 +387,7 @@ def generate_full_beveling_path(
         home_x: Home position X
         home_z: Home position Z
         xyz_feedrate: XYZ feedrate in mm/sec
-        
+        base_theta_offset: float = 0.0
     Returns:
         MovementPath with beveling operation
     """
@@ -355,7 +398,7 @@ def generate_full_beveling_path(
         operation_type='home',
         x=np.array([home_x]),
         z=np.array([home_z]),
-        theta=np.array([0.0]),
+        theta=np.array([base_theta_offset]),
         time=np.array([0.0]),
         total_frames=1
     ))
@@ -374,19 +417,36 @@ def generate_full_beveling_path(
     # Get start position
     start_x = wheel_x - kinematics['x_machine'][0]
     start_z = wheel_z + kinematics['z_machine'][0]
-    start_theta = kinematics['theta_machine_deg'][0]
+    start_theta = kinematics['theta_machine_deg'][0] + base_theta_offset
     
     # 3. APPROACH
-    approach_dist = np.sqrt(start_x**2 + start_z**2)
-    if approach_dist > 0.1:
-        steps.append(_generate_linear_path(
-            start=(home_x, home_z, 0.0),
-            end=(start_x, start_z, start_theta),
-            distance_mm=approach_dist,
-            speed_mm_per_sec=xyz_feedrate,
-            feed_rate_s_per_rev=speed_s_per_rev,
-            operation_type='approach'
-        ))
+    # Retract to safe distance first
+    retract_x = wheel_x - kinematics['x_machine'][0] - 40.0
+    retract_z = wheel_z + kinematics['z_machine'][0]
+    retract_theta = start_theta
+
+    retract_dist = np.sqrt(
+        (retract_x - home_x)**2 + (retract_z - home_z)**2
+    )
+
+    steps.append(_generate_linear_path(
+        start=(home_x, home_z, base_theta_offset),
+        end=(retract_x, retract_z, retract_theta),
+        distance_mm=retract_dist,
+        speed_mm_per_sec=xyz_feedrate,
+        operation_type='approach'
+    ))
+
+    # Approach to start position
+    approach_dist = 40
+
+    steps.append(_generate_linear_path(
+        start=(retract_x, retract_z, retract_theta),
+        end=(start_x, start_z, start_theta),
+        distance_mm=approach_dist,
+        speed_mm_per_sec=10,
+        operation_type='approach'
+    ))
     
     # 4. CUTTING PASS (beveling)
     steps.append(_generate_cutting_path(
@@ -402,19 +462,34 @@ def generate_full_beveling_path(
     # 5. RETRACT
     end_x = wheel_x - kinematics['x_machine'][-1]
     end_z = wheel_z + kinematics['z_machine'][-1]
-    end_theta = kinematics['theta_machine_deg'][-1]
+    end_theta = kinematics['theta_machine_deg'][-1] + base_theta_offset
+
+    # Retract to safe distance first
+    retract_x = end_x - 40.0
+    retract_z = end_z
+    retract_theta = end_theta
+
+    retract_dist = 40
+
+    steps.append(_generate_linear_path(
+        start=(end_x, end_z, end_theta),
+        end=(retract_x, retract_z, retract_theta),
+        distance_mm=retract_dist,
+        speed_mm_per_sec=xyz_feedrate,
+        operation_type='retract'
+    ))
     
-    retract_dist = np.sqrt(
-        (home_x - end_x)**2 + (home_z - end_z)**2
+    # Finally retract to home
+    final_retract_dist = np.sqrt(
+        (home_x - retract_x)**2 + (home_z - retract_z)**2
     )
-    if retract_dist > 0.1:
-        steps.append(_generate_linear_path(
-            start=(end_x, end_z, end_theta),
-            end=(home_x, home_z, 0.0),
-            distance_mm=retract_dist,
-            speed_mm_per_sec=xyz_feedrate,
-            operation_type='retract'
-        ))
+    steps.append(_generate_linear_path(
+        start=(retract_x, retract_z, retract_theta),
+        end=(home_x, home_z, base_theta_offset),
+        distance_mm=final_retract_dist,
+        speed_mm_per_sec=xyz_feedrate,
+        operation_type='retract'
+    ))
     
     return MovementPath(steps)
 
@@ -483,7 +558,8 @@ def generate_complete_lens_path(
             wheel_x=wheel_x_bevel,
             wheel_z=wheel_z_bevel,
             speed_s_per_rev=beveling_speed_override or 10.0,
-            xyz_feedrate=xyz_feedrate
+            xyz_feedrate=xyz_feedrate,
+            base_theta_offset=360.0 * len(roughing_passes)
         )
     
     # Combine into complete path
