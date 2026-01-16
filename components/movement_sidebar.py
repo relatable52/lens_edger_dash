@@ -100,7 +100,10 @@ roughing_settings = html.Div(
 
         # Hidden stores
         dcc.Store(id='store-roughing-data', data={'method': 'CONCENTRIC', 'passes': []}),
-        dcc.Store(id='store-roughing-results', data=[])  # Stores RoughingPassData results from mesh calculation
+        dcc.Store(id='store-roughing-results', data=[]),  # Stores RoughingPassData results from mesh calculation
+        
+        # Download component for exporting tool paths
+        dcc.Download(id='download-toolpath')
     ]
 )
 
@@ -120,6 +123,14 @@ action_buttons = html.Div(
             color="primary", 
             size="sm", 
             className="w-100 mb-2 fw-bold"
+        ),
+        dbc.Button(
+            "Download Toolpath & Time", 
+            id="btn-download-toolpath", 
+            color="success", 
+            size="sm", 
+            className="w-100 mb-2",
+            disabled=True  # Enabled after path generation
         ),
     ]
 )
