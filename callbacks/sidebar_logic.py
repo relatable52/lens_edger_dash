@@ -68,19 +68,26 @@ def register_sidebar_callback(app):
             
             updated_data = current_store_data.copy()
             
+            # Helper function to safely convert to float
+            def safe_float(val, default=0.0):
+                try:
+                    return float(val) if val is not None else default
+                except (ValueError, TypeError):
+                    return default
+            
             # Update Common Params
-            updated_data['fpd'] = fpd
-            updated_data['dbl'] = dbl
+            updated_data['fpd'] = safe_float(fpd)
+            updated_data['dbl'] = safe_float(dbl)
             
             # Update Left Eye Params (if it exists)
             if updated_data.get('left'):
-                updated_data['left']['ipd'] = ipd_l
-                updated_data['left']['ocht'] = ocht_l
+                updated_data['left']['ipd'] = safe_float(ipd_l)
+                updated_data['left']['ocht'] = safe_float(ocht_l)
                 
             # Update Right Eye Params (if it exists)
             if updated_data.get('right'):
-                updated_data['right']['ipd'] = ipd_r
-                updated_data['right']['ocht'] = ocht_r
+                updated_data['right']['ipd'] = safe_float(ipd_r)
+                updated_data['right']['ocht'] = safe_float(ocht_r)
                 
             # Return: New Store Data ONLY. 
             # We send `no_update` to inputs to keep the cursor stable while typing.
