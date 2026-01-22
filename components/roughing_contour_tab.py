@@ -47,32 +47,32 @@ def render_figure(roughing_results: list, oma_job_data: dict = None, eye_select:
     ]
     
     # Plot final lens shape first (so it appears in background)
-    if oma_job_data:
-        try:
-            from core.models.lenses import OMAJob
-            oma_job = OMAJob.from_dict(oma_job_data)
-            if oma_job and oma_job.left:
-                final_radii = np.array(oma_job.left.radii) if eye_select == 'L' else np.array(oma_job.right.radii)
-                num_points = len(final_radii)
-                angles = np.linspace(0, 2*np.pi, num_points, endpoint=False)
+    # if oma_job_data:
+    #     try:
+    #         from core.models.lenses import OMAJob
+    #         oma_job = OMAJob.from_dict(oma_job_data)
+    #         if oma_job and oma_job.left:
+    #             final_radii = np.array(oma_job.left.radii) if eye_select == 'L' else np.array(oma_job.right.radii)
+    #             num_points = len(final_radii)
+    #             angles = np.linspace(0, 2*np.pi, num_points, endpoint=False)
                 
-                x_final = final_radii * np.cos(angles)
-                y_final = final_radii * np.sin(angles)
+    #             x_final = final_radii * np.cos(angles)
+    #             y_final = final_radii * np.sin(angles)
                 
-                # Close the loop
-                x_final = np.append(x_final, x_final[0])
-                y_final = np.append(y_final, y_final[0])
+    #             # Close the loop
+    #             x_final = np.append(x_final, x_final[0])
+    #             y_final = np.append(y_final, y_final[0])
                 
-                fig.add_trace(go.Scatter(
-                    x=x_final,
-                    y=y_final,
-                    mode='lines',
-                    name='Final Lens Shape',
-                    line=dict(color="black", width=3, dash="dash"),
-                    hovertemplate='<b>Final Lens Shape</b><br>X: %{x:.2f} mm<br>Y: %{y:.2f} mm<extra></extra>'
-                ))
-        except Exception as e:
-            print(f"Warning: Could not plot final lens shape: {e}")
+    #             fig.add_trace(go.Scatter(
+    #                 x=x_final,
+    #                 y=y_final,
+    #                 mode='lines',
+    #                 name='Final Lens Shape',
+    #                 line=dict(color="black", width=3, dash="dash"),
+    #                 hovertemplate='<b>Final Lens Shape</b><br>X: %{x:.2f} mm<br>Y: %{y:.2f} mm<extra></extra>'
+    #             ))
+    #     except Exception as e:
+    #         print(f"Warning: Could not plot final lens shape: {e}")
     
     # Plot each roughing pass
     for i, result in enumerate(roughing_results):
