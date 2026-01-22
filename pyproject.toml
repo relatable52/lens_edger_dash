@@ -16,6 +16,7 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "rtree>=1.4.1",
     "scipy>=1.16.3",
+    "tqdm>=4.67.1",
     "trimesh>=4.10.1",
     "vtk>=9.5.2",
 ]

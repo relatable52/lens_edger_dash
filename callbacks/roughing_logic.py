@@ -2,6 +2,7 @@ from dash import Input, Output, State, ctx, no_update
 from core.models.roughing import RoughingPassParam, RoughingSettings
 import numpy as np
 import plotly.graph_objects as go
+from core.geometric.three_d_generation import offset_radii_map
 
 
 def register_roughing_callbacks(app):
@@ -155,11 +156,20 @@ def register_roughing_callbacks(app):
                 print("Error: OMA job data is invalid or incomplete.")
                 return no_update, no_update
             
-            final_radii = np.array(oma_job.left.radii) if eye_select == 'L' else np.array(oma_job.right.radii)
-            
-            if len(final_radii) == 0:
-                print("Error: OMA job contains no radii data.")
+            # Select the correct eye
+            frame = oma_job.left if eye_select == 'L' else oma_job.right
+            if not frame or len(frame.radii) == 0:
+                print("Error: OMA job contains no radii data for selected eye.")
                 return no_update, no_update
+            
+            # Calculate offset to center frame shape on lens blank (same as 3D prepare logic)
+            half_fpd = oma_job.fpd / 2.0
+            offset_x = frame.ipd - half_fpd if eye_select == 'R' else -frame.ipd + half_fpd
+            offset_y = frame.ocht - (frame.vbox / 2.0)
+            
+            # Apply offsets to center the frame data on the lens blank
+            final_radii, _ = offset_radii_map(frame.radii, frame.z_map, -offset_x, -offset_y)
+            final_radii = np.array(final_radii)
             
             # Extract lens blank parameters from lens_data
             lens_data = LensPair.from_dict(lens_data).left if eye_select == 'L' else LensPair.from_dict(lens_data).right

@@ -11,6 +11,7 @@ from scipy.interpolate import interp1d
 from core.geometric.tool_profiles import V_BEVEL, FLAT, GROOVE
 from core.machine_config import load_machine_config_cached
 from core.models.tools import ToolStack
+from tqdm import tqdm
 
 TOOL_STACK = load_machine_config_cached()
 
@@ -231,7 +232,8 @@ def compute_voxel_death_times(voxels, voxel_res, tool_path, tool_stack: ToolStac
     
     num_steps = len(tool_path['time'])
     
-    for i in range(0, num_steps, 5): # Step skip optimization (adjust as needed)
+    for i in (loop:=tqdm(range(0, num_steps, 5))): # Step skip optimization (adjust as needed)
+        loop.set_description("Computing Voxel Death Times")
         t = tool_path['time'][i]
         r_mach = tool_stack.base_position[0] - tool_path['x'][i]
         z_mach = tool_stack.base_position[2] - tool_path['z'][i]
